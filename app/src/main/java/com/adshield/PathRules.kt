@@ -24,6 +24,7 @@ object PathRules {
     val DEFAULT_BLOCKED_PATHS: List<String> = listOf(
         "/_xa/ads",          // Pornhub/Aylo first-party ad-tag endpoint
         "/_xa/ad",
+        "/_xa/",             // ALL Pornhub ad endpoints (v0.8.9)
         "vast",              // VAST ad tags served first-party
         "ima3",              // IMA SDK ad requests
         "/ima/",
