@@ -88,7 +88,7 @@ class MainActivity : Activity() {
 
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         val brand = TextView(this).apply {
-            text = "ADSHIELD"
+            text = "S-ADSHIELD"
             textSize = 24f
             setTextColor(color("#F4F7FB"))
             typeface = Typeface.create("sans", Typeface.BOLD)
@@ -216,7 +216,7 @@ class MainActivity : Activity() {
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  AdShield v0.7.1"
+            text = "Developed with love by Shiv  •  S-AdShield v0.7.1"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))
