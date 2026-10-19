@@ -459,10 +459,16 @@ class MitmSession(
         val blocked = PathRules.isAdPath(target, blockPaths)
         MitmDebug.log("handleRequest host=$host target=${target.take(120)} blocked=$blocked")
         if (blocked) {
-            // Blocked ad path: video ad tags get the deterministic empty
-            // VAST ("no ad"); anything else gets the extension-based stub.
-            val stub = if (StubHttpServer.isAdTag(target)) StubHttpServer.emptyVastResponse()
-            else StubHttpServer.buildResponse(target, accept)
+            // Blocked ad path: return the right "no ad" stub for the
+            // expected content type. JSON ad endpoints (preroll_type=json)
+            // get empty JSON; VAST/XML tags get empty VAST; else generic.
+            val lower = target.lowercase()
+            val stub = when {
+                lower.contains("preroll_type=json") || lower.contains("json") ->
+                    StubHttpServer.jsonNoAdsResponse()
+                StubHttpServer.isAdTag(target) -> StubHttpServer.emptyVastResponse()
+                else -> StubHttpServer.buildResponse(target, accept)
+            }
             sendToClient(stub)
             return
         }

@@ -151,6 +151,12 @@ object StubHttpServer {
     fun emptyVastResponse(): ByteArray =
         http(200, "OK", "application/xml", EMPTY_VAST.toByteArray(Charsets.US_ASCII))
 
+    /** Empty JSON "no ads" response for JSON ad endpoints (preroll_type=json). */
+    fun jsonNoAdsResponse(): ByteArray {
+        val json = "{\"ads\":[],\"status\":\"ok\"}"
+        return http(200, "OK", "application/json", json.toByteArray(Charsets.US_ASCII))
+    }
+
     private fun http(status: Int, reason: String, contentType: String, body: ByteArray): ByteArray {
         val head = "HTTP/1.1 $status $reason\r\n" +
             "Content-Type: $contentType\r\n" +
