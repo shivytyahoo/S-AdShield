@@ -184,9 +184,11 @@ class TlsServerConn(caManager: CaManager, host: String) {
      * (or the stream closed); true when progress may continue.
      */
     private fun unwrapOne(): Boolean {
-        if (!netIn.hasRemaining()) {
-            val chunk = pendingNet.poll() ?: return false
-            // Preserve any unprocessed tail (should be none here).
+        // Drain ALL pending chunks into netIn first (fixes fragmented
+        // ClientHello: previously, after BUFFER_UNDERFLOW, the next chunk
+        // sat in pendingNet forever while we retried the incomplete data).
+        while (true) {
+            val chunk = pendingNet.poll() ?: break
             val tail = ByteArray(netIn.remaining())
             netIn.get(tail)
             netIn.clear()
@@ -196,6 +198,7 @@ class TlsServerConn(caManager: CaManager, host: String) {
             netIn.put(chunk)
             netIn.flip()
         }
+        if (!netIn.hasRemaining()) return false
         appIn.clear()
         val res = try {
             engine.unwrap(netIn, appIn)
