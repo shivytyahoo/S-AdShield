@@ -26,6 +26,10 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
+import android.app.AlertDialog
+import android.security.KeyChain
+import android.widget.EditText
+import android.widget.Toast
 
 /**
  * Modern AdShield dashboard. Framework-only UI keeps the APK small and works
@@ -36,6 +40,9 @@ class MainActivity : Activity() {
     private lateinit var batteryButton: Button
     private lateinit var streamingButton: Button
     private lateinit var antiDetectButton: Button
+    private lateinit var mitmButton: Button
+    private lateinit var caButton: Button
+    private lateinit var domainsButton: Button
     private lateinit var statusText: TextView
     private lateinit var shieldIcon: TextView
     private lateinit var queryValue: TextView
@@ -196,6 +203,41 @@ class MainActivity : Activity() {
             setOnClickListener { toggleAntiDetect() }
         }
         hero.addView(antiDetectButton, LinearLayout.LayoutParams(-1, dp(42)))
+        hero.addView(space(8))
+        mitmButton = Button(this).apply {
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            isAllCaps = false
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setOnClickListener { toggleMitm() }
+        }
+        hero.addView(mitmButton, LinearLayout.LayoutParams(-1, dp(42)))
+        hero.addView(space(8))
+        caButton = Button(this).apply {
+            text = "INSTALL CA CERTIFICATE"
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            isAllCaps = false
+            setTextColor(color("#08111F"))
+            background = rounded("#FFB84D", 14)
+            setPadding(dp(12), 0, dp(12), 0)
+            setOnClickListener { installCaCert() }
+        }
+        hero.addView(caButton, LinearLayout.LayoutParams(-1, dp(42)))
+        hero.addView(space(8))
+        domainsButton = Button(this).apply {
+            text = "MITM DOMAINS"
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            isAllCaps = false
+            setTextColor(color("#93A4BA"))
+            background = rounded("#16352F", 14)
+            setPadding(dp(12), 0, dp(12), 0)
+            setOnClickListener { showDomainEditor() }
+        }
+        hero.addView(domainsButton, LinearLayout.LayoutParams(-1, dp(42)))
+        updateMitmButton()
         root.addView(hero)
         protectionCard = hero
 
@@ -225,7 +267,7 @@ class MainActivity : Activity() {
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  S-AdShield v0.7.3"
+            text = "Developed with love by Shiv  •  S-AdShield v0.8.0"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))
@@ -348,6 +390,81 @@ class MainActivity : Activity() {
         val next = !prefs.getBoolean(AdShieldVpnService.KEY_SURROGATE, true)
         prefs.edit().putBoolean(AdShieldVpnService.KEY_SURROGATE, next).apply()
         updateAntiDetectButton()
+    }
+
+    // ---------- HTTPS Path Filter MITM (v0.8.0) ----------
+
+    private fun toggleMitm() {
+        val prefs = getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
+        val next = !prefs.getBoolean(AdShieldVpnService.KEY_MITM_ENABLED, false)
+        if (next && !prefs.getBoolean(AdShieldVpnService.KEY_MITM_CA_DONE, false)) {
+            Toast.makeText(this,
+                "Pehle CA certificate install karo (neeche button)",
+                Toast.LENGTH_LONG).show()
+            return
+        }
+        prefs.edit().putBoolean(AdShieldVpnService.KEY_MITM_ENABLED, next).apply()
+        updateMitmButton()
+        if (next) {
+            Toast.makeText(this,
+                "HTTPS Path Filter ON — VPN restart karo (STOP phir START)",
+                Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun updateMitmButton() {
+        val prefs = getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
+        val on = prefs.getBoolean(AdShieldVpnService.KEY_MITM_ENABLED, false)
+        val caDone = prefs.getBoolean(AdShieldVpnService.KEY_MITM_CA_DONE, false)
+        mitmButton.text = "HTTPS PATH FILTER: ${if (on) "ON" else "OFF"}"
+        mitmButton.setTextColor(color(if (on) "#59E1B8" else "#93A4BA"))
+        mitmButton.background = rounded("#16352F", 14)
+        mitmButton.setPadding(dp(12), 0, dp(12), 0)
+        caButton.visibility = if (on || !caDone) View.VISIBLE else View.GONE
+        domainsButton.visibility = if (on) View.VISIBLE else View.GONE
+        if (caDone) caButton.text = "CA INSTALLED ✓ (tap to reinstall)"
+    }
+
+    private fun installCaCert() {
+        try {
+            val caMgr = CaManager(filesDir)
+            caMgr.getOrCreateCa() // generate on first run
+            val pem = caMgr.caCertPem()
+            val intent = KeyChain.createInstallIntent()
+            intent.putExtra(KeyChain.EXTRA_CERTIFICATE, pem)
+            intent.putExtra(KeyChain.EXTRA_NAME, "AdShield MITM CA")
+            startActivity(intent)
+            // Mark done; user confirms in system UI. If they cancel, the
+            // toggle will remind them (cert won't validate, sessions fail
+            // closed and traffic relays normally).
+            getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
+                .edit().putBoolean(AdShieldVpnService.KEY_MITM_CA_DONE, true).apply()
+            updateMitmButton()
+        } catch (e: Exception) {
+            Toast.makeText(this, "CA error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showDomainEditor() {
+        val prefs = getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
+        val current = prefs.getString(AdShieldVpnService.KEY_MITM_DOMAINS,
+            AdShieldVpnService.DEFAULT_MITM_DOMAINS) ?: ""
+        val input = EditText(this).apply {
+            setText(current)
+            hint = "pornhub.org,pornhub.com"
+            setSingleLine(false)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("MITM Domains (comma-separated)")
+            .setMessage("Sirf in domains ka HTTPS decrypt hoga. Baaki sab untouched.")
+            .setView(input)
+            .setPositiveButton("SAVE") { _, _ ->
+                prefs.edit().putString(AdShieldVpnService.KEY_MITM_DOMAINS,
+                    input.text.toString()).apply()
+                Toast.makeText(this, "Saved — VPN restart karo", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("CANCEL", null)
+            .show()
     }
 
     private fun openBatterySettings() {

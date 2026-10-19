@@ -84,4 +84,88 @@ object DnsPacket {
         for (i in 6 until 12) out[i] = 0
         return out
     }
+
+    /**
+     * Build a minimal DNS query for [host] (type A by default). Used by the
+     * MITM upstream resolver (v0.8.0) which must bypass our own filter.
+     */
+    fun buildQuery(host: String, qType: Int = 1): ByteArray {
+        val labels = host.trimEnd('.').split(".")
+        val nameBytes = ArrayList<Byte>()
+        for (l in labels) {
+            val b = l.toByteArray(Charsets.US_ASCII)
+            nameBytes.add(b.size.toByte())
+            for (x in b) nameBytes.add(x)
+        }
+        nameBytes.add(0)
+        val out = ByteArray(12 + nameBytes.size + 4)
+        val id = (System.nanoTime() and 0xFFFF).toInt()
+        out[0] = ((id shr 8) and 0xFF).toByte()
+        out[1] = (id and 0xFF).toByte()
+        out[2] = 0x01 // RD = 1
+        out[3] = 0
+        out[4] = 0; out[5] = 1 // QDCOUNT = 1
+        for (i in nameBytes.indices) out[12 + i] = nameBytes[i]
+        val q = 12 + nameBytes.size
+        out[q] = ((qType shr 8) and 0xFF).toByte()
+        out[q + 1] = (qType and 0xFF).toByte()
+        out[q + 2] = 0; out[q + 3] = 1 // CLASS IN
+        return out
+    }
+
+    /**
+     * Parse the first A-record IPv4 address from a DNS [response], or null.
+     * Handles name compression pointers in answers.
+     */
+    fun parseFirstA(response: ByteArray, length: Int): ByteArray? {
+        if (length < 12) return null
+        val anCount = ((response[6].toInt() and 0xFF) shl 8) or (response[7].toInt() and 0xFF)
+        if (anCount == 0) return null
+        var pos = 12
+        // Skip question section.
+        val qdCount = ((response[4].toInt() and 0xFF) shl 8) or (response[5].toInt() and 0xFF)
+        repeat(qdCount) {
+            pos = skipName(response, length, pos) ?: return null
+            pos += 4
+            if (pos > length) return null
+        }
+        repeat(anCount) {
+            pos = skipName(response, length, pos) ?: return null
+            if (pos + 10 > length) return null
+            val type = ((response[pos].toInt() and 0xFF) shl 8) or (response[pos + 1].toInt() and 0xFF)
+            val rdLen = ((response[pos + 8].toInt() and 0xFF) shl 8) or (response[pos + 9].toInt() and 0xFF)
+            if (type == 1 && rdLen == 4 && pos + 10 + 4 <= length) {
+                return response.copyOfRange(pos + 10, pos + 14)
+            }
+            // CNAME (type 5): the canonical name may have its own A later;
+            // keep scanning subsequent answers.
+            pos += 10 + rdLen
+            if (pos > length) return null
+        }
+        return null
+    }
+
+    private fun skipName(msg: ByteArray, length: Int, start: Int): Int? {
+        var p = start
+        var jumped = false
+        var jumps = 0
+        while (p < length) {
+            val n = msg[p].toInt() and 0xFF
+            if (n == 0) { p++; break }
+            if ((n and 0xC0) == 0xC0) {
+                if (p + 1 >= length) return null
+                if (!jumped) { /* offset for caller not needed here */ }
+                p = ((n and 0x3F) shl 8) or (msg[p + 1].toInt() and 0xFF)
+                jumped = true
+                if (++jumps > 8) return null
+                continue
+            }
+            if (n > 63 || p + 1 + n > length) return null
+            p += 1 + n
+            if (jumped) break
+        }
+        // If we followed a pointer, the caller's position is just past it.
+        // Simplify: return start+2 when a jump happened at the first byte.
+        return if ((msg[start].toInt() and 0xC0) == 0xC0) start + 2 else p
+    }
 }

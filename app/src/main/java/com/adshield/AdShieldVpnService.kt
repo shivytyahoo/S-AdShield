@@ -74,6 +74,138 @@ class AdShieldVpnService : VpnService() {
         }
     }
 
+    // HTTPS path filter MITM (v0.8.0): per-domain TLS interception scoped to
+    // user-listed domains only. Created in startVpn() when enabled.
+    private var mitmRelay: MitmTcpRelay? = null
+    private var mitmIpSet: Set<ByteArray> = emptySet()
+    /** MITM IP string ("10.10.10.4") -> domain it stands in for. */
+    private var mitmIpToHost: Map<String, String> = emptyMap()
+    private var caManager: CaManager? = null
+
+    private fun mitmEnabled(): Boolean = try {
+        getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_MITM_ENABLED, false)
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun mitmDomains(): List<String> = try {
+        val raw = getSharedPreferences(PREFS, MODE_PRIVATE)
+            .getString(KEY_MITM_DOMAINS, DEFAULT_MITM_DOMAINS) ?: DEFAULT_MITM_DOMAINS
+        raw.split(",").map { it.trim().lowercase() }
+            .filter { it.isNotEmpty() && it.contains(".") }
+            .distinct().take(MAX_MITM_DOMAINS)
+    } catch (_: Exception) {
+        listOf("pornhub.org", "pornhub.com")
+    }
+
+    private fun mitmBlockPaths(): List<String> = try {
+        val raw = getSharedPreferences(PREFS, MODE_PRIVATE)
+            .getString(KEY_MITM_RULES, "") ?: ""
+        val custom = raw.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+        if (custom.isEmpty()) PathRules.DEFAULT_BLOCKED_PATHS else custom
+    } catch (_: Exception) {
+        PathRules.DEFAULT_BLOCKED_PATHS
+    }
+
+    /** Build domain -> MITM IP bytes, in pref order. */
+    private fun buildMitmMap(): Map<String, ByteArray> {
+        val map = LinkedHashMap<String, ByteArray>()
+        var fourth = MITM_IP_BASE_FOURTH
+        for (d in mitmDomains()) {
+            if (fourth > 250) break
+            map[d] = byteArrayOf(10, 10, 10, fourth.toByte())
+            fourth++
+        }
+        return map
+    }
+
+    /** True if [name] is a MITM-listed domain or its subdomain. */
+    private fun isMitmName(name: String): Boolean {
+        val n = name.lowercase().trimEnd('.')
+        for (d in mitmDomains()) {
+            if (n == d || n.endsWith(".$d")) return true
+        }
+        return false
+    }
+
+    /** MITM IP bytes for [name], or null if not a listed domain. */
+    private fun mitmIpFor(name: String): ByteArray? {
+        val n = name.lowercase().trimEnd('.')
+        val map = buildMitmMap()
+        for ((d, ip) in map) {
+            if (n == d || n.endsWith(".$d")) return ip
+        }
+        return null
+    }
+
+    private fun getCaManager(): CaManager {
+        val cur = caManager
+        if (cur != null) return cur
+        val created = CaManager(filesDir)
+        caManager = created
+        return created
+    }
+
+    /**
+     * Resolve [host] to its real IP via a protect()-ed DNS query to 8.8.8.8,
+     * bypassing our own filter (the VPN would otherwise answer the MITM IP).
+     */
+    private fun resolveUpstreamIp(host: String): ByteArray? {
+        return try {
+            val query = DnsPacket.buildQuery(host, 1)
+            val sock = DatagramSocket()
+            try {
+                protect(sock)
+                sock.soTimeout = 5000
+                val req = DatagramPacket(query, query.size, InetAddress.getByName("8.8.8.8"), 53)
+                sock.send(req)
+                val buf = ByteArray(512)
+                val resp = DatagramPacket(buf, buf.size)
+                sock.receive(resp)
+                DnsPacket.parseFirstA(resp.data, resp.length)
+            } finally {
+                try { sock.close() } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Open the real upstream connection for a MITM session: protect()-ed
+     * socket to the domain's real IP (never the MITM IP), TLS-wrapped for
+     * port 443 with standard system trust validation.
+     */
+    private fun openUpstreamSocket(host: String, port: Int): java.net.Socket {
+        val realIp = resolveUpstreamIp(host)
+            ?: throw java.io.IOException("upstream DNS failed for $host")
+        val addr = InetAddress.getByAddress(realIp)
+        val raw = java.net.Socket()
+        try {
+            protect(raw)
+            raw.connect(java.net.InetSocketAddress(addr, port), 10000)
+            raw.soTimeout = 30000
+        } catch (e: Exception) {
+            try { raw.close() } catch (_: Exception) {}
+            throw e
+        }
+        if (port != 443) return raw
+        return try {
+            val ctx = javax.net.ssl.SSLContext.getInstance("TLS")
+            ctx.init(null, null, null) // default system trust managers
+            val factory = ctx.socketFactory
+            val tls = factory.createSocket(raw, host, port, true) as javax.net.ssl.SSLSocket
+            tls.sslParameters = tls.sslParameters.apply {
+                endpointIdentificationAlgorithm = "HTTPS"
+            }
+            tls.startHandshake()
+            tls
+        } catch (e: Exception) {
+            try { raw.close() } catch (_: Exception) {}
+            throw e
+        }
+    }
+
     /** Anti-detect mode pref (default ON); re-read lazily, toggled from UI. */
     private fun surrogateEnabled(): Boolean = try {
         getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_SURROGATE, true)
@@ -150,6 +282,11 @@ class AdShieldVpnService : VpnService() {
         if (statsLoaded) flushStats()
         try { dnsExecutor?.shutdownNow() } catch (_: Exception) {}
         dnsExecutor = null
+        // MITM relay holds live sessions; drop the reference so a fresh
+        // startVpn() rebuilds it from current prefs.
+        mitmRelay = null
+        mitmIpSet = emptySet()
+        mitmIpToHost = emptyMap()
         try { tunIn?.close() } catch (_: Exception) {}
         tunIn = null
         try { tunOut?.close() } catch (_: Exception) {}
@@ -216,6 +353,51 @@ class AdShieldVpnService : VpnService() {
                 builder.addRoute(ip, 32)
             } catch (_: Exception) {}
         }
+        // HTTPS path filter MITM (v0.8.0): route each per-domain MITM IP
+        // into the TUN so MitmTcpRelay can intercept it.
+        if (mitmEnabled()) {
+            val map = buildMitmMap()
+            val ipToHost = LinkedHashMap<String, String>()
+            val ipSet = LinkedHashSet<ByteArray>()
+            for ((domain, ipBytes) in map) {
+                val ipStr = "${ipBytes[0].toInt() and 0xFF}.${ipBytes[1].toInt() and 0xFF}." +
+                    "${ipBytes[2].toInt() and 0xFF}.${ipBytes[3].toInt() and 0xFF}"
+                try {
+                    builder.addRoute(ipStr, 32)
+                } catch (_: Exception) {}
+                ipToHost[ipStr] = domain
+                ipSet.add(ipBytes)
+            }
+            mitmIpToHost = ipToHost
+            mitmIpSet = ipSet
+            val blockPaths = mitmBlockPaths()
+            mitmRelay = MitmTcpRelay(
+                ipToHost = ipToHost,
+                openSession = { host, port, onSend, onClose ->
+                    MitmSession(
+                        host = host,
+                        port = port,
+                        caManager = getCaManager(),
+                        blockPaths = blockPaths,
+                        openUpstream = { h, p -> openUpstreamSocket(h, p) },
+                        onSendToClient = onSend,
+                        onClose = onClose
+                    )
+                },
+                onSend = { packet ->
+                    synchronized(writeLock) {
+                        try {
+                            tunOut?.write(packet)
+                            tunOut?.flush()
+                        } catch (_: Exception) {}
+                    }
+                }
+            )
+        } else {
+            mitmRelay = null
+            mitmIpSet = emptySet()
+            mitmIpToHost = emptyMap()
+        }
         val pfd = builder.establish() ?: run {
                 running = false
                 stopSelf()
@@ -262,6 +444,19 @@ class AdShieldVpnService : VpnService() {
                     } catch (_: Exception) {
                         // Malformed TCP: drop, the client will retransmit.
                     }
+                } else {
+                    // HTTPS path filter MITM (v0.8.0): traffic to per-domain
+                    // MITM IPs goes to the TLS-intercepting relay.
+                    val mr = mitmRelay
+                    if (mr != null && mitmIpSet.isNotEmpty()) {
+                        try {
+                            if (MitmTcpRelay.isMitmTcp(packet, mitmIpSet)) {
+                                mr.handlePacket(packet)
+                            }
+                        } catch (_: Exception) {
+                            // Malformed TCP: drop, the client will retransmit.
+                        }
+                    }
                 }
                 // Anything else is dropped: only the DNS /32s and the stub
                 // /32 are routed into this TUN, so nothing else is expected.
@@ -307,6 +502,22 @@ class AdShieldVpnService : VpnService() {
 
     private fun handleDns(query: DnsQuery) {
         val question = DnsPacket.parseQuestion(query.payload, query.payload.size)
+        // HTTPS path filter MITM (v0.8.0): listed domains resolve to their
+        // per-domain MITM IP (takes precedence over the blocklist). AAAA
+        // gets empty NOERROR to keep clients on IPv4 where we intercept.
+        if (question != null && mitmEnabled()) {
+            val mitmIp = mitmIpFor(question.name)
+            if (mitmIp != null) {
+                recordQuery(false)
+                val response = when (question.qType) {
+                    1 -> DnsPacket.surrogateResponse(query.payload, query.payload.size, mitmIp)
+                    28 -> DnsPacket.emptyResponse(query.payload, query.payload.size)
+                    else -> DnsPacket.blockedResponse(query.payload, query.payload.size)
+                }
+                writeDnsResponse(query.sourceIp, query.sourcePort, query.destIp, response)
+                return
+            }
+        }
         val hit = question != null && AdBlocker.isBlocked(question.name)
         recordQuery(hit)
         if (hit) {
@@ -537,6 +748,18 @@ class AdShieldVpnService : VpnService() {
         const val STUB_ADDRESS = "10.10.10.3"
         const val KEY_SURROGATE = "surrogate_stubs"
         private val STUB_IP_BYTES = byteArrayOf(10, 10, 10, 3)
+        // HTTPS path filter MITM (v0.8.0): per-domain local MITM IPs starting
+        // at 10.10.10.4. Listed domains resolve here (DNS override) and
+        // MitmTcpRelay + MitmSession do TLS interception scoped to just
+        // those domains, blocking ad URL paths uBlock-style.
+        const val KEY_MITM_ENABLED = "mitm_enabled"
+        const val KEY_MITM_DOMAINS = "mitm_domains"
+        const val KEY_MITM_RULES = "mitm_rules"
+        const val KEY_MITM_CA_DONE = "mitm_ca_done"
+        const val DEFAULT_MITM_DOMAINS = "pornhub.org,pornhub.com"
+        private const val MITM_IP_THIRD = 10
+        private const val MITM_IP_BASE_FOURTH = 4
+        private const val MAX_MITM_DOMAINS = 16
         // Well-known public DNS resolver IPs hijacked into the TUN (v0.6.0)
         // so hardcoded-DNS and encrypted-DNS bypass attempts hit this engine.
         private val PUBLIC_RESOLVER_IPS = listOf(

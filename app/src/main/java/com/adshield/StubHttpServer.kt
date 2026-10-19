@@ -133,6 +133,24 @@ object StubHttpServer {
     fun badRequest(): ByteArray =
         http(400, "Bad Request", "text/plain", ByteArray(0))
 
+    /**
+     * True if [target] looks like a video ad-*tag* request (returns VAST)
+     * rather than an ad *creative* (image/script). Used by the HTTPS path
+     * filter: a blocked ad path with no creative extension (e.g.
+     * `/_xa/ads`) is a tag endpoint, so the deterministic "no ad" signal
+     * is an empty VAST, not a 204 (which some players retry).
+     */
+    fun isAdTag(target: String): Boolean {
+        val t = target.lowercase().substringBefore('?').substringBefore('#')
+        return t.contains("vast") || t.contains("ima3") || t.contains("/ima/") ||
+            t.contains("/ads") || t.contains("adserver") || t.contains("adtag") ||
+            t.contains("preroll") || t.contains("midroll") || t.contains("postroll")
+    }
+
+    /** Valid empty VAST 3.0 response: the deterministic "no ad" signal. */
+    fun emptyVastResponse(): ByteArray =
+        http(200, "OK", "application/xml", EMPTY_VAST.toByteArray(Charsets.US_ASCII))
+
     private fun http(status: Int, reason: String, contentType: String, body: ByteArray): ByteArray {
         val head = "HTTP/1.1 $status $reason\r\n" +
             "Content-Type: $contentType\r\n" +
