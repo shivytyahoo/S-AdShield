@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.adshield"
+    namespace = "shivyt.android.adshield"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.adshield"
+        applicationId = "shivyt.android.adshield"
         minSdk = 23
         targetSdk = 36
         versionCode = 13

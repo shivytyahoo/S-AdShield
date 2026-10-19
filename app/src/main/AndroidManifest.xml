@@ -11,7 +11,7 @@
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_adshield"
-        android:label="AdShield" android:roundIcon="@drawable/ic_adshield"
+        android:label="S-AdShield" android:roundIcon="@drawable/ic_adshield"
         android:theme="@style/Theme.AdShield">
 
         <activity
