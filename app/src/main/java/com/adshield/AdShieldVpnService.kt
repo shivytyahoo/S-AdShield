@@ -327,7 +327,11 @@ class AdShieldVpnService : VpnService() {
             startForeground(7, notification())
         }
         AdBlocker.initAsync(applicationContext)
-        if (!running) startVpn()
+        // Always (re)start the VPN to pick up pref changes (e.g. MITM
+        // routes). If the service wasn't fully stopped, running may still
+        // be true — shut down first so the new config applies.
+        if (running) shutdownVpn()
+        startVpn()
         return START_STICKY
     }
 
