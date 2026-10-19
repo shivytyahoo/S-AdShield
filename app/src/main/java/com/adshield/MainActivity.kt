@@ -267,7 +267,7 @@ class MainActivity : Activity() {
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  S-AdShield v0.8.2"
+            text = "Developed with love by Shiv  •  S-AdShield v0.8.3"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))
@@ -430,19 +430,75 @@ class MainActivity : Activity() {
             val caMgr = CaManager(filesDir)
             caMgr.getOrCreateCa() // generate on first run
             val pem = caMgr.caCertPem()
-            val intent = KeyChain.createInstallIntent()
-            intent.putExtra(KeyChain.EXTRA_CERTIFICATE, pem)
-            intent.putExtra(KeyChain.EXTRA_NAME, "AdShield MITM CA")
-            startActivity(intent)
-            // Mark done; user confirms in system UI. If they cancel, the
-            // toggle will remind them (cert won't validate, sessions fail
-            // closed and traffic relays normally).
+            // Save to Downloads for manual install (more reliable than
+            // KeyChain intent on Samsung/OneUI devices).
+            val fileName = "adshield-ca.crt"
+            val saved = saveCertToDownloads(fileName, pem)
+            if (saved) {
+                showCaInstallGuide(fileName)
+            } else {
+                // Fallback: try KeyChain intent
+                val intent = KeyChain.createInstallIntent()
+                intent.putExtra(KeyChain.EXTRA_CERTIFICATE, pem)
+                intent.putExtra(KeyChain.EXTRA_NAME, "AdShield MITM CA")
+                startActivity(intent)
+            }
             getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
                 .edit().putBoolean(AdShieldVpnService.KEY_MITM_CA_DONE, true).apply()
             updateMitmButton()
         } catch (e: Exception) {
             Toast.makeText(this, "CA error: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun saveCertToDownloads(fileName: String, pem: ByteArray): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/x-x509-ca-cert")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Download/")
+                }
+                val uri = contentResolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    contentResolver.openOutputStream(uri)?.use { it.write(pem) }
+                    true
+                } else false
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS)
+                val file = java.io.File(dir, fileName)
+                file.writeBytes(pem)
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun showCaInstallGuide(fileName: String) {
+        AlertDialog.Builder(this)
+            .setTitle("CA Certificate Saved!")
+            .setMessage("File Downloads me save ho gayi: $fileName\n\n" +
+                "Ab install karo:\n" +
+                "1. Settings kholo\n" +
+                "2. Biometrics and security → Other security settings\n" +
+                "3. Install from device storage → CA certificate\n" +
+                "4. \"$fileName\" select karo → Install dabao\n\n" +
+                "Install hone ke baad HTTPS PATH FILTER on kar sakte ho.")
+            .setPositiveButton("SETTINGS KHOLO") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                } catch (_: Exception) {
+                    try {
+                        startActivity(Intent(Settings.ACTION_SETTINGS))
+                    } catch (_: Exception) {}
+                }
+            }
+            .setNegativeButton("BAAD ME", null)
+            .show()
     }
 
     private fun showDomainEditor() {
