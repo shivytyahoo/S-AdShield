@@ -153,7 +153,10 @@ class CaManager(private val filesDir: File) {
             )
             builder.addExtension(
                 Extension.subjectAlternativeName, false,
-                GeneralNames(GeneralName(GeneralName.dNSName, clean))
+                GeneralNames(arrayOf(
+                    GeneralName(GeneralName.dNSName, clean),
+                    GeneralName(GeneralName.dNSName, "*.$clean")
+                ))
             )
             builder.addExtension(
                 Extension.authorityKeyIdentifier, false,
