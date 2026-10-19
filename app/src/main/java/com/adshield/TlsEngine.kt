@@ -482,14 +482,12 @@ class MitmSession(
             out.write(rawHead)
             out.flush()
             val inp = upstream.getInputStream()
+            // Universal VAST detector (v0.8.11): read response headers first.
+            // If it looks like VAST/XML, buffer the body and neutralize any
+            // ads. Otherwise stream through normally.
             val upToClient = Thread({
-                val buf = ByteArray(32768)
                 try {
-                    while (!closed) {
-                        val n = inp.read(buf)
-                        if (n <= 0) break
-                        sendToClient(buf.copyOf(n))
-                    }
+                    relayUpstreamWithVastFilter(inp, sendToClient, target)
                 } catch (_: Exception) {
                 } finally {
                     close()
@@ -521,6 +519,115 @@ class MitmSession(
             } catch (_: Exception) {
             }
         }
+    }
+
+    /**
+     * Universal VAST detector (v0.8.11): relays upstream response to client,
+     * but if the response looks like VAST/XML, buffers it and replaces any
+     * actual ads with an empty VAST. Works for ANY site, no per-site patterns.
+     */
+    private fun relayUpstreamWithVastFilter(
+        inp: java.io.InputStream,
+        sendToClient: (ByteArray) -> Unit,
+        target: String
+    ) {
+        val temp = ByteArray(16384)
+        var totalHeader = 0
+        var foundEnd = -1
+        while (foundEnd == -1 && totalHeader < 16384) {
+            val n = inp.read(temp, totalHeader, temp.size - totalHeader)
+            if (n <= 0) break
+            totalHeader += n
+            for (i in 0 until totalHeader - 3) {
+                if (temp[i] == 13.toByte() && temp[i+1] == 10.toByte() &&
+                    temp[i+2] == 13.toByte() && temp[i+3] == 10.toByte()) {
+                    foundEnd = i + 4
+                    break
+                }
+            }
+        }
+        if (foundEnd == -1) {
+            if (totalHeader > 0) sendToClient(temp.copyOf(totalHeader))
+            streamRest(inp, sendToClient)
+            return
+        }
+        val headerStr = String(temp, 0, foundEnd, Charsets.US_ASCII)
+        val lowerHeader = headerStr.lowercase()
+        val isXml = lowerHeader.contains("content-type:") &&
+            (lowerHeader.contains("xml") || lowerHeader.contains("vast"))
+        val urlHint = target.lowercase().contains("vast") ||
+            target.lowercase().contains("ima3")
+        val bodyStart = foundEnd
+        val bodyAlready = if (totalHeader > bodyStart) {
+            temp.copyOfRange(bodyStart, totalHeader)
+        } else ByteArray(0)
+        if (!isXml && !urlHint) {
+            sendToClient(temp.copyOf(totalHeader))
+            streamRest(inp, sendToClient)
+            return
+        }
+        MitmDebug.log("VAST filter: buffering response for ${target.take(80)}")
+        // Get Content-Length to know how much to read
+        val contentLength = Regex("Content-Length: (\\d+)", RegexOption.IGNORE_CASE)
+            .find(headerStr)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+        if (contentLength <= 0 || contentLength > 2 * 1024 * 1024) {
+            // No Content-Length or too large: pass through without buffering
+            MitmDebug.log("VAST filter: no/invalid Content-Length, passing through")
+            sendToClient(temp.copyOf(totalHeader))
+            if (bodyAlready.isNotEmpty()) sendToClient(bodyAlready)
+            streamRest(inp, sendToClient)
+            return
+        }
+        val bodyOut = java.io.ByteArrayOutputStream()
+        bodyOut.write(bodyAlready)
+        var remaining = contentLength - bodyAlready.size
+        val buf = ByteArray(32768)
+        try {
+            while (remaining > 0) {
+                val toRead = minOf(buf.size, remaining)
+                val n = inp.read(buf, 0, toRead)
+                if (n <= 0) break
+                bodyOut.write(buf, 0, n)
+                remaining -= n
+            }
+        } catch (_: Exception) {}
+        val body = bodyOut.toByteArray()
+        val bodyStr = try { String(body, Charsets.UTF_8) } catch (_: Exception) { "" }
+        val isVastAd = bodyStr.contains("<VAST") &&
+            (bodyStr.contains("<Ad>") || bodyStr.contains("<Ad ")) &&
+            bodyStr.contains("<MediaFile")
+        if (isVastAd) {
+            MitmDebug.log("VAST filter: AD DETECTED, replacing with empty VAST")
+            val emptyVastBytes = StubHttpServer.emptyVastBytes()
+            var newHeaders = headerStr
+            // Fix Content-Length
+            newHeaders = newHeaders.replace(
+                Regex("Content-Length: \\d+", RegexOption.IGNORE_CASE),
+                "Content-Length: ${emptyVastBytes.size}"
+            )
+            // Remove Transfer-Encoding: chunked if present (we're sending fixed length)
+            newHeaders = newHeaders.replace(
+                Regex("Transfer-Encoding: chunked\r\n", RegexOption.IGNORE_CASE),
+                ""
+            )
+            sendToClient((newHeaders + String(emptyVastBytes, Charsets.US_ASCII)).toByteArray(Charsets.US_ASCII))
+        } else {
+            MitmDebug.log("VAST filter: no ad, passing through")
+            sendToClient(temp.copyOf(totalHeader))
+            if (body.isNotEmpty()) sendToClient(body)
+            streamRest(inp, sendToClient)
+        }
+    }
+
+    private fun streamRest(inp: java.io.InputStream, sendToClient: (ByteArray) -> Unit) {
+        val buf = ByteArray(32768)
+        try {
+            while (!closed) {
+                val n = inp.read(buf)
+                if (n <= 0) break
+                sendToClient(buf.copyOf(n))
+            }
+        } catch (_: Exception) {}
     }
 
     private fun finish() {
