@@ -51,6 +51,15 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // If a previous run crashed, show the captured report instead of
+        // the dashboard so the cause can be diagnosed from the device.
+        if (ShieldApp.hasCrashReport(application)) {
+            startActivity(Intent(this, CrashActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+            finish()
+            return
+        }
         window.statusBarColor = Color.rgb(8, 17, 31)
         window.navigationBarColor = Color.rgb(8, 17, 31)
         if (Build.VERSION.SDK_INT >= 23) window.decorView.systemUiVisibility = 0
@@ -216,7 +225,7 @@ class MainActivity : Activity() {
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  S-AdShield v0.7.2"
+            text = "Developed with love by Shiv  •  S-AdShield v0.7.3"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))

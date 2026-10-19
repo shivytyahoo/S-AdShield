@@ -10,12 +10,18 @@
 
     <application
         android:allowBackup="false"
+        android:name="com.adshield.ShieldApp"
         android:icon="@drawable/ic_adshield"
         android:label="S-AdShield" android:roundIcon="@drawable/ic_adshield"
         android:theme="@style/Theme.AdShield">
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.adshield.CrashActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AdShield"/>
+
+        <activity
+            android:name="com.adshield.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -25,7 +31,7 @@
         </activity>
 
         <service
-            android:name=".AdShieldVpnService"
+            android:name="com.adshield.AdShieldVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:exported="false"
             android:foregroundServiceType="specialUse">
@@ -38,7 +44,7 @@
         </service>
 
         <receiver
-            android:name=".BootReceiver"
+            android:name="com.adshield.BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
