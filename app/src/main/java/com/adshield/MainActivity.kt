@@ -216,7 +216,7 @@ class MainActivity : Activity() {
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  S-AdShield v0.7.1"
+            text = "Developed with love by Shiv  •  S-AdShield v0.7.2"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))
