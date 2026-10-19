@@ -456,7 +456,9 @@ class MitmSession(
         readClient: () -> ByteArray?,
         openUp: () -> Socket
     ) {
-        if (PathRules.isAdPath(target, blockPaths)) {
+        val blocked = PathRules.isAdPath(target, blockPaths)
+        MitmDebug.log("handleRequest host=$host target=${target.take(120)} blocked=$blocked")
+        if (blocked) {
             // Blocked ad path: video ad tags get the deterministic empty
             // VAST ("no ad"); anything else gets the extension-based stub.
             val stub = if (StubHttpServer.isAdTag(target)) StubHttpServer.emptyVastResponse()
