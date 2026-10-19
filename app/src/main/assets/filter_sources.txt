@@ -1,0 +1,20 @@
+# AdShield filter source registry
+# The current MVP engine consumes DNS/hosts-style domain lists.
+# Browser-only cosmetic/scriptlet rules are intentionally not imported.
+#
+# Primary bundled source:
+# https://github.com/StevenBlack/hosts
+#
+# Active since v0.5.2:
+# assets/ublock_domains.txt — uBlock Origin uAssets converted to DNS host rules
+# (plain "block host" rules only; paths/redirects/removeparam/cosmetic/scriptlet
+# rules dropped because the DNS engine cannot execute them). Whole-service
+# parents such as youtube.com/facebook.com/google.com were excluded on purpose.
+#
+# Compatible future sources (must be converted to DNS domain entries):
+# https://github.com/uBlockOrigin/uAssets
+# https://github.com/AdguardTeam/AdguardFilters
+# https://easylist.to/
+#
+# Do not use these URLs as executable code. Import only filter data that is
+# compatible with the AdShield DNS engine and preserve each source license.

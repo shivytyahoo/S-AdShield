@@ -1,0 +1,10 @@
+<resources>
+    <color name="shield_bg">#08111F</color>
+    <color name="shield_surface">#101C2E</color>
+    <color name="shield_surface_2">#15243A</color>
+    <color name="shield_text">#F4F7FB</color>
+    <color name="shield_muted">#93A4BA</color>
+    <color name="shield_accent">#59E1B8</color>
+    <color name="shield_accent_2">#4AA3FF</color>
+    <color name="shield_danger">#FF6B7A</color>
+</resources>

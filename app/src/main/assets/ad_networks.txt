@@ -1,0 +1,46 @@
+# AdShield curated mobile-ad network domains.
+# DNS-level rules only: these domains are blocked when resolved by the VPN.
+# Network names covered:
+# Google AdMob, AppLovin MAX/AppLovin, ironSource, Chartboost,
+# StartApp, Fyber/Digital Turbine FairBid, BidMachine, Appodeal.
+
+# Google AdMob / Google mobile advertising
+a.googleadservices.com
+admob.com
+admobclick.com
+ads.google.com
+pagead2.googlesyndication.com
+googleadservices.com
+googlesyndication.com
+doubleclick.net
+
+# AppLovin / MAX
+applovin.com
+applovinres.com
+applovinres.edgekey.net
+
+# ironSource
+ironsource.com
+ironsrc.com
+ads.ironsrc.com
+init.supersonicads.com
+
+# Chartboost
+chartboost.com
+chartboosts.com
+
+# StartApp
+startapp.com
+startappservice.com
+startappexchange.com
+
+# Fyber / Digital Turbine FairBid
+fyber.com
+digitalturbine.com
+
+# BidMachine
+bidmachine.io
+
+# Appodeal
+appodeal.com
+appodealx.com

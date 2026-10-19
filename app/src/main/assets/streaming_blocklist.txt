@@ -1,0 +1,24 @@
+# AdShield STREAMING EXTREME pack (v0.6.0) - toggleable in the app.
+# Server-side ad insertion (SSAI) middlemen used by streaming apps:
+# Google DAI / IMA (JioHotstar, many TV apps), FreeWheel (Tubi/Peacock/Pluto),
+# SpotX, Innovid, SpringServe, Yospace, Amazon Publisher Services (Prime Video).
+# WARNING: blocking the IMA/DAI endpoints can stop playback in a few apps
+# whose player refuses to start without its ad SDK. If a streaming app's
+# video stops starting, turn STREAMING EXTREME off in AdShield and tell us.
+dai.google.com
+imasdk.googleapis.com
+freewheel.tv
+fwmrm.net
+spotxchange.com
+spotx.tv
+innovid.com
+springserve.com
+yospace.com
+tremormedia.com
+unrulymedia.com
+casalemedia.com
+indexww.com
+rlcdn.com
+tiqcdn.com
+advertising.amazon.com
+fls-na.amazon.com

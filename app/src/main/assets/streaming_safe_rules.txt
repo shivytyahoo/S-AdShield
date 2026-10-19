@@ -1,0 +1,9 @@
+# AdShield v0.5.3 — streaming-safe aggressive DNS rules
+# IMPORTANT: Do not block netflix.com, primevideo.com, hotstar.com, jiocinema.com,
+# disneyplus.com, or their playback/CDN parents wholesale. DNS-only blocking cannot
+# remove server-side/stitched ads without risking playback.
+#
+# This file is intentionally reserved for ad/telemetry hostnames that can be blocked
+# independently of the streaming service. Add only verified host-level rules here.
+#
+# The main uBlock/AdGuard DNS-compatible host list remains in ublock_domains.txt.

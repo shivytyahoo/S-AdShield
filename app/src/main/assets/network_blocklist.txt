@@ -1,0 +1,69 @@
+# AdShield targeted ad-network shield (added v0.5.0, 2026-10-08)
+# One parent domain per line. AdShield matches the domain itself and every
+# subdomain below it. Sources checked before adding: AdGuard Mobile Ads
+# domain rules, StevenBlack hosts, public SDK documentation/search results.
+# Deliberately NOT whole-sale imported: some broad filter entries would
+# also block youtube.com / facebook.com, which must keep working.
+
+# Google AdMob / Google mobile ads
+doubleclick.net
+googlesyndication.com
+googleadservices.com
+adservice.google.com
+admobclick.com
+mobondhrd.appspot.com
+tap-nexus.appspot.com
+
+# AppLovin / AppLovin MAX mediation
+applovin.com
+
+# ironSource / Unity LevelPlay / Unity Ads
+ironsrc.com
+is.com
+supersonicads.com
+supersonicads-a.akamaihd.net
+unityads.unity3d.com
+mediation.unity3d.com
+iads.unity3d.com
+
+# Chartboost
+chartboost.com
+chartboosts.com
+
+# StartApp / Start.io SDK
+startappnetwork.com
+startappservice.com
+startapp.com
+
+# Fyber / DT FairBid / Inneractive
+fyber.com
+inneractive.com
+
+# BidMachine
+bidmachine.io
+
+# Appodeal stack endpoints
+appodeal.com
+appodealx.com
+
+# Merged from Shiv's v0.4.1 ad-network build (unique to that ZIP)
+admob.com
+ads.google.com
+applovinres.com
+applovinres.edgekey.net
+ironsource.com
+startappexchange.com
+digitalturbine.com
+
+# Encrypted-DNS (DoH) bypass guard: if an app resolves these hostnames to
+# sneak around AdShield, the lookup fails and it falls back to system DNS.
+dns.google
+cloudflare-dns.com
+one.one.one.one
+mozilla.cloudflare-dns.com
+dns.quad9.net
+doh.opendns.com
+dns.adguard-dns.com
+dns.adguard.com
+dns.nextdns.io
+doh.cleanbrowsing.org
