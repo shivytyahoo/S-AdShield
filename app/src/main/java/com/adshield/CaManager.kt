@@ -53,10 +53,15 @@ class CaManager(private val filesDir: File) {
     private val serverCertCache = ConcurrentHashMap<String, KeyStore>()
 
     init {
-        // Register once; harmless if already present.
-        if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
+        // Android ships an old, stripped-down BouncyCastle as "BC" which
+        // lacks SHA256withRSA signer support. Replace it with our bundled
+        // (complete) BouncyCastle so cert generation works.
+        try {
+            Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME)
+        } catch (_: Exception) {}
+        try {
             Security.addProvider(BouncyCastleProvider())
-        }
+        } catch (_: Exception) {}
     }
 
     private fun caKeyFile() = File(filesDir, "mitm_ca.key.pem")

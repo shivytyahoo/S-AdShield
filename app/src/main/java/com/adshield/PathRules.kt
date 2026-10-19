@@ -33,7 +33,18 @@ object PathRules {
         "popads",
         "exoclick",
         "adsterra",
-        "/bannerads/"
+        "/bannerads/",
+        // Streaming ad platforms (v0.8.1): FreeWheel, SpotX, SpringServe,
+        // Anvato, Amazon AAX — first-party ad paths on streaming sites.
+        "freewheel",
+        "spotxchange",
+        "spotx",
+        "springserve",
+        "anvato",
+        "/aax/",             // Amazon Advertising
+        "amazon-adsystem",
+        "/ads/vast",
+        "/ad/vast"
     )
 
     /**
