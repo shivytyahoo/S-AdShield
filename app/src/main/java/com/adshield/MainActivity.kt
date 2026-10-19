@@ -43,6 +43,7 @@ class MainActivity : Activity() {
     private lateinit var mitmButton: Button
     private lateinit var caButton: Button
     private lateinit var domainsButton: Button
+    private lateinit var logButton: Button
     private lateinit var statusText: TextView
     private lateinit var shieldIcon: TextView
     private lateinit var queryValue: TextView
@@ -237,6 +238,18 @@ class MainActivity : Activity() {
             setOnClickListener { showDomainEditor() }
         }
         hero.addView(domainsButton, LinearLayout.LayoutParams(-1, dp(42)))
+        hero.addView(space(8))
+        logButton = Button(this).apply {
+            text = "SHARE MITM LOG"
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            isAllCaps = false
+            setTextColor(color("#93A4BA"))
+            background = rounded("#16352F", 14)
+            setPadding(dp(12), 0, dp(12), 0)
+            setOnClickListener { shareMitmLog() }
+        }
+        hero.addView(logButton, LinearLayout.LayoutParams(-1, dp(42)))
         updateMitmButton()
         root.addView(hero)
         protectionCard = hero
@@ -267,7 +280,7 @@ class MainActivity : Activity() {
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  S-AdShield v0.8.5"
+            text = "Developed with love by Shiv  •  S-AdShield v0.8.6"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))
@@ -521,6 +534,35 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("CANCEL", null)
             .show()
+    }
+
+    private fun shareMitmLog() {
+        try {
+            val logFile = java.io.File(filesDir, "mitm_debug.log")
+            if (!logFile.exists() || logFile.length() == 0L) {
+                Toast.makeText(this, "Log khaali hai — pehle MITM ON karke site kholo", Toast.LENGTH_LONG).show()
+                return
+            }
+            val content = logFile.readText().take(8000)
+            val tv = TextView(this).apply {
+                text = content
+                textSize = 10f
+                setPadding(dp(16), dp(16), dp(16), dp(16))
+            }
+            val scroll = ScrollView(this).apply { addView(tv) }
+            AlertDialog.Builder(this)
+                .setTitle("MITM Debug Log (copy karke bhejo)")
+                .setView(scroll)
+                .setPositiveButton("COPY") { _, _ ->
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("mitm", content))
+                    Toast.makeText(this, "Copied!", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("CLOSE", null)
+                .show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Log error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun openBatterySettings() {

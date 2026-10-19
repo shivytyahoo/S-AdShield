@@ -360,6 +360,13 @@ class AdShieldVpnService : VpnService() {
         // HTTPS path filter MITM (v0.8.0): route each per-domain MITM IP
         // into the TUN so MitmTcpRelay can intercept it.
         if (mitmEnabled()) {
+            // Setup debug logging (v0.8.6)
+            try {
+                val logFile = java.io.File(filesDir, "mitm_debug.log")
+                MitmDebug.logFile = logFile
+                MitmDebug.clear()
+                MitmDebug.log("=== MITM session started, domains=${mitmDomains()} ===")
+            } catch (_: Exception) {}
             val map = buildMitmMap()
             val ipToHost = LinkedHashMap<String, String>()
             val ipSet = LinkedHashSet<ByteArray>()

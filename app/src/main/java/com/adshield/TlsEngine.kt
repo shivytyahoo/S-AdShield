@@ -254,6 +254,27 @@ class TlsServerConn(caManager: CaManager, host: String) {
 }
 
 /**
+ * Simple file logger for MITM debugging (v0.8.6). Set [logFile] from the
+ * service; logs are appended with timestamps. User can share the file.
+ */
+object MitmDebug {
+    @Volatile var logFile: java.io.File? = null
+
+    fun log(msg: String) {
+        try {
+            val f = logFile ?: return
+            val ts = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US)
+                .format(java.util.Date())
+            f.appendText("[$ts] $msg\n")
+        } catch (_: Exception) {}
+    }
+
+    fun clear() {
+        try { logFile?.writeText("") } catch (_: Exception) {}
+    }
+}
+
+/**
  * One MITM'd connection: [host]:[port].
  *
  * @param openUpstream opens an already-connected socket to the real
@@ -302,15 +323,24 @@ class MitmSession(
     // ---------------- TLS (443) ----------------
 
     private fun runTls() {
-        val tls = TlsServerConn(caManager, host)
+        MitmDebug.log("runTls start host=$host port=$port")
+        val tls = try {
+            TlsServerConn(caManager, host)
+        } catch (e: Exception) {
+            MitmDebug.log("runTls: TlsServerConn failed: ${e.message}")
+            return
+        }
+        MitmDebug.log("runTls: beginHandshake")
         tls.beginHandshake()
         flushNet(tls)
         while (!tls.handshakeDone && !tls.closed && !closed) {
             val chunk = inbound.take()
             if (closed) return
+            MitmDebug.log("runTls: got ${chunk.size}b from client, feeding")
             tls.feedNet(chunk)
             flushNet(tls)
         }
+        MitmDebug.log("runTls: handshake done=${tls.handshakeDone} closed=${tls.closed}")
         if (tls.closed || closed) return
 
         val head = readHttpHead { tls.pollApp() ?: takeNet(tls) } ?: return

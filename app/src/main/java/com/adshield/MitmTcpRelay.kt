@@ -103,6 +103,7 @@ class MitmTcpRelay(
             val isn = nextIsn()
             val c = Conn(ST_SYN_RCVD, seq + 1, isn, null, dstIpStr, dstPort)
             conns[key] = c
+            MitmDebug.log("MitmTcpRelay: SYN $dstIpStr:$dstPort <- ${ipKey(srcIp)}:$srcPort, sending SYN-ACK")
             sendSynAck(srcIp, srcPort, dstIp, dstPort, isn, seq + 1)
             c.srvSeq += 1
             return
@@ -115,6 +116,7 @@ class MitmTcpRelay(
             ST_SYN_RCVD -> {
                 if (flags and F_ACK != 0 && ack == c.srvSeq) {
                     c.state = ST_EST
+                    MitmDebug.log("MitmTcpRelay: handshake complete for $host:$dstPort, creating session")
                     // Handshake done: spin up the MITM session now.
                     val session = try {
                         openSession(
@@ -122,7 +124,8 @@ class MitmTcpRelay(
                             { bytes -> sendAppData(c, srcIp, srcPort, dstIp, bytes) },
                             { requestFin(c, srcIp, srcPort, dstIp) }
                         )
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        MitmDebug.log("MitmTcpRelay: openSession failed: ${e.message}")
                         null
                     }
                     if (session == null) {
