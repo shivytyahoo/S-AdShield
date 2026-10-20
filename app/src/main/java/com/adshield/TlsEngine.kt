@@ -771,32 +771,44 @@ class MitmSession(
      */
     private fun cleanAdConfig(text: String): Pair<String, Int> {
         var cleaned = text
+        var adCount = 0
         cleaned = cleaned.replace(
-            Regex("\"(vastUrl|adUrl|prerollUrl|adTagUrl|vmapUrl)\"\\s*:\\s*\"https?://[^\"]+\"", RegexOption.IGNORE_CASE),
+            Regex("\"(vastUrl|adUrl|prerollUrl|adTagUrl|vmapUrl|popunderUrl|popupUrl)\"\\s*:\\s*\"https?://[^\"]+\"", RegexOption.IGNORE_CASE),
             "\"$1\":\"\""
         )
+        // Popunder/popup config objects (v0.8.19): {"...popunder...":{"url":
+        // "//rotating-domain/..."}} — the URL itself carries no ad marker
+        // and is often protocol-relative, so match by the KEY context and
+        // empty the url value whatever domain/path it uses.
+        val popObj = Regex(
+            "(\"(?:[^\"]*(?:popunder|popup|pop_under)[^\"]*)\"\\s*:\\s*\\{[^{}]*?\"url\"\\s*:\\s*\")(?:https?:)?//[^\"]*(\")",
+            RegexOption.IGNORE_CASE)
+        cleaned = popObj.replace(cleaned) { m ->
+            adCount++
+            m.groupValues[1] + m.groupValues[2]
+        }
         // TrafficJunky embed context meta: carries the display-ad payloads.
         cleaned = cleaned.replace(
             Regex("<meta[^>]*trafficjunky[^>]*>", RegexOption.IGNORE_CASE), "")
         // Empty embedded VAST URL arrays (e.g. xHamster's vastUrls) so the
         // player has no VAST tag to fetch at all (v0.8.16).
         cleaned = emptyJsonArray(cleaned, "vastUrls")
-        // Null out ANY quoted ad-config URL by marker. Covers Pornhub's
-        // adRoll "json" (/_xa/ads) links, VAST tags on rotating ad domains,
-        // JSON ad-spot payloads, and ad-network URLs — universally.
-        var adCount = 0
+        // Blank out any URL-shaped run carrying an ad marker (v0.8.19).
+        // Deliberately independent of quote pairing: naive quote matching
+        // desyncs on short/escaped strings in real pages, which silently
+        // exempted whole ad configs. A URL run is scheme + "//" (plain or
+        // \/-escaped, or protocol-relative) up to the next delimiter.
         val adUrlMarkers = listOf("/_xa/", "vast", "preroll", "trafficjunky",
-            "trafficstars", "exoclick", "adsterra", "doubleclick",
+            "trafficstars", "syndicate", "popunder", "/v1/direct/",
+            "exoclick", "adsterra", "doubleclick",
             "googlesyndication", "adservice.", "adserver")
-        val quotedUrl = Regex("\"[^\"]{8,2500}\"")
-        cleaned = quotedUrl.replace(cleaned) { m ->
-            val v = m.value
-            val norm = v.replace("\\/", "/").lowercase()
-            val isUrl = norm.contains("http") || norm.contains("://")
-            if (isUrl && adUrlMarkers.any { norm.contains(it) }) {
+        val urlRun = Regex("""(?:https?:)?(?:[\\/]{2})[^\s"'`<>()]+""")
+        cleaned = urlRun.replace(cleaned) { m ->
+            val norm = m.value.replace("\\/", "/").lowercase()
+            if (adUrlMarkers.any { norm.contains(it) }) {
                 adCount++
-                "\"\""
-            } else v
+                ""
+            } else m.value
         }
         return cleaned to adCount
     }
