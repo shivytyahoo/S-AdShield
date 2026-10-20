@@ -553,8 +553,11 @@ class MitmSession(
         }
         val headerStr = String(temp, 0, foundEnd, Charsets.US_ASCII)
         val lowerHeader = headerStr.lowercase()
-        val isXml = lowerHeader.contains("content-type:") &&
-            (lowerHeader.contains("xml") || lowerHeader.contains("vast"))
+        // Only treat as potential VAST if Content-Type is strict XML
+        // (NOT xhtml — that's HTML pages! Double-sending those broke sites).
+        val ctLine = lowerHeader.lines().firstOrNull { it.startsWith("content-type:") } ?: ""
+        val isXml = ctLine.contains("application/xml") || ctLine.contains("text/xml") ||
+            ctLine.contains("application/vast") || ctLine.contains("+xml") && !ctLine.contains("xhtml")
         val urlHint = target.lowercase().contains("vast") ||
             target.lowercase().contains("ima3")
         val bodyStart = foundEnd
@@ -572,9 +575,9 @@ class MitmSession(
             .find(headerStr)?.groupValues?.get(1)?.toIntOrNull() ?: -1
         if (contentLength <= 0 || contentLength > 2 * 1024 * 1024) {
             // No Content-Length or too large: pass through without buffering
+            // (send everything read so far once, then stream the rest).
             MitmDebug.log("VAST filter: no/invalid Content-Length, passing through")
             sendToClient(temp.copyOf(totalHeader))
-            if (bodyAlready.isNotEmpty()) sendToClient(bodyAlready)
             streamRest(inp, sendToClient)
             return
         }
@@ -613,7 +616,9 @@ class MitmSession(
             sendToClient((newHeaders + String(emptyVastBytes, Charsets.US_ASCII)).toByteArray(Charsets.US_ASCII))
         } else {
             MitmDebug.log("VAST filter: no ad, passing through")
-            sendToClient(temp.copyOf(totalHeader))
+            // Send ONLY headers (not totalHeader — that included bodyAlready,
+            // which is also in `body` → double-send corrupted the response).
+            sendToClient(temp.copyOf(foundEnd))
             if (body.isNotEmpty()) sendToClient(body)
             streamRest(inp, sendToClient)
         }
