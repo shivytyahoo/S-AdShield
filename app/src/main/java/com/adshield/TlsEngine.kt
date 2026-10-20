@@ -556,28 +556,33 @@ class MitmSession(
         }
         val headerStr = String(temp, 0, foundEnd, Charsets.US_ASCII)
         val lowerHeader = headerStr.lowercase()
+        // Log every response's Content-Type (v0.8.18): makes user-shared
+        // logs decisive about which responses carry ad payloads.
+        val ctLine = lowerHeader.lines().firstOrNull { it.startsWith("content-type:") } ?: ""
+        MitmDebug.log("resp ct='${ctLine.trim()}' for ${target.take(70)}")
         // Only treat as potential VAST if Content-Type is strict XML
         // (NOT xhtml — that's HTML pages! Double-sending those broke sites).
-        val ctLine = lowerHeader.lines().firstOrNull { it.startsWith("content-type:") } ?: ""
         val isXml = ctLine.contains("application/xml") || ctLine.contains("text/xml") ||
             ctLine.contains("application/vast") || ctLine.contains("+xml") && !ctLine.contains("xhtml")
-        // HTML pages: filter embedded ad config (v0.8.13). JSON API
-        // responses: same cleaning (v0.8.17) — modern sites deliver player
-        // ad config and ad-spot widgets as JSON, not just in page HTML.
-        val isHtml = ctLine.contains("text/html")
-        val isJson = ctLine.contains("json")
+        // HTML pages AND JSON/text API responses get the ad-config cleaner
+        // (v0.8.13/v0.8.17): modern sites deliver player ad config and
+        // ad-spot widgets as JSON or plain text, sometimes with no
+        // Content-Type at all (v0.8.18) — clean anything text-like.
+        val cleanable = ctLine.contains("text/html") || ctLine.contains("json") ||
+            ctLine.contains("javascript") || ctLine.contains("text/plain") ||
+            ctLine.contains("text/css") || ctLine.isBlank()
         val urlHint = target.lowercase().contains("vast") ||
             target.lowercase().contains("ima3")
         val bodyStart = foundEnd
         val bodyAlready = if (totalHeader > bodyStart) {
             temp.copyOfRange(bodyStart, totalHeader)
         } else ByteArray(0)
-        if (!isXml && !urlHint && !isHtml && !isJson) {
+        if (!isXml && !urlHint && !cleanable) {
             sendToClient(temp.copyOf(totalHeader))
             streamRest(inp, sendToClient)
             return
         }
-        if (isHtml || isJson) {
+        if (cleanable && !isXml) {
             MitmDebug.log("Content filter: cleaning ad config for ${target.take(80)}")
             filterHtmlResponse(inp, sendToClient, headerStr, temp, foundEnd, totalHeader)
             return

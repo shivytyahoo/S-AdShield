@@ -25,6 +25,7 @@ object PathRules {
         "/_xa/ads",          // Pornhub/Aylo first-party ad-tag endpoint
         "/_xa/ad",
         "/_xa/",             // ALL Pornhub ad endpoints (v0.8.9)
+        "spottype=",         // ad-spot widget requests (xHamster-style, v0.8.18)
         "vast",              // VAST ad tags served first-party
         "ima3",              // IMA SDK ad requests
         "/ima/",
@@ -53,13 +54,17 @@ object PathRules {
      * an ad/tag request under [blockedPaths].
      */
     fun isAdPath(rawTarget: String, blockedPaths: Collection<String> = DEFAULT_BLOCKED_PATHS): Boolean {
-        val path = rawTarget.lowercase()
-            .substringBefore('?')
-            .substringBefore('#')
+        val full = rawTarget.lowercase()
+        val path = full.substringBefore('?').substringBefore('#')
         if (path.isEmpty()) return false
         for (rule in blockedPaths) {
             val r = rule.lowercase().trim()
-            if (r.isNotEmpty() && path.contains(r)) return true
+            if (r.isEmpty()) continue
+            // Rules containing '=' are query-parameter rules (e.g.
+            // "spottype=") and match the full target; all other rules
+            // match the path only (v0.8.18).
+            val haystack = if (r.contains('=')) full else path
+            if (haystack.contains(r)) return true
         }
         return false
     }
