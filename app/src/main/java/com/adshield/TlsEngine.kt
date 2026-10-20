@@ -748,16 +748,25 @@ class MitmSession(
         // TrafficJunky embed context meta: carries the display-ad payloads.
         cleaned = cleaned.replace(
             Regex("<meta[^>]*trafficjunky[^>]*>", RegexOption.IGNORE_CASE), "")
-        val adDomains = listOf("doubleclick.net", "googlesyndication.com", "adservice.",
-            "trafficjunky.net", "trafficjunky.com", "exoclick.com", "adsterra.com")
+        // Empty embedded VAST URL arrays (e.g. xHamster's vastUrls) so the
+        // player has no VAST tag to fetch at all (v0.8.16).
+        cleaned = emptyJsonArray(cleaned, "vastUrls")
+        // Null out ANY quoted ad-config URL by marker (plain or \/-escaped).
+        // Covers Pornhub's adRoll "json" (/_xa/ads) links, VAST tags on
+        // rotating ad domains, and ad-network URLs — universally.
         var adCount = 0
-        for (domain in adDomains) {
-            val pattern = Regex("\"https?://[^\"]*" + Regex.escape(domain) + "[^\"]*\"", RegexOption.IGNORE_CASE)
-            val matches = pattern.findAll(cleaned).count()
-            if (matches > 0) {
-                cleaned = pattern.replace(cleaned, "\"\"")
-                adCount += matches
-            }
+        val adUrlMarkers = listOf("/_xa/", "vast", "preroll", "trafficjunky",
+            "trafficstars", "exoclick", "adsterra", "doubleclick",
+            "googlesyndication", "adservice.", "adserver")
+        val quotedUrl = Regex("\"[^\"]{8,2500}\"")
+        cleaned = quotedUrl.replace(cleaned) { m ->
+            val v = m.value
+            val norm = v.replace("\\/", "/").lowercase()
+            val isUrl = norm.contains("http") || norm.contains("://")
+            if (isUrl && adUrlMarkers.any { norm.contains(it) }) {
+                adCount++
+                "\"\""
+            } else v
         }
         MitmDebug.log("HTML filter: removed $adCount ad URLs (chunked=$chunked, body=${bodyBytes.size}b)")
         val cleanedBytes = cleaned.toByteArray(Charsets.UTF_8)
@@ -774,9 +783,45 @@ class MitmSession(
         sendToClient(cleanedBytes)
     }
 
+    /**
+     * Empties a JSON array value for the given key (e.g. "vastUrls":[...])
+     * wherever it appears — bracket-matched, string-aware (v0.8.16).
+     */
+    private fun emptyJsonArray(html: String, key: String): String {
+        val needle = "\"" + key + "\""
+        var result = html
+        var idx = result.indexOf(needle)
+        while (idx >= 0) {
+            var i = result.indexOf(':', idx + needle.length)
+            if (i < 0) break
+            i++
+            while (i < result.length && result[i].isWhitespace()) i++
+            if (i >= result.length || result[i] != '[') {
+                idx = result.indexOf(needle, idx + 1); continue
+            }
+            var depth = 0; var j = i; var inStr = false; var esc = false
+            while (j < result.length) {
+                val c = result[j]
+                if (inStr) {
+                    if (esc) esc = false
+                    else if (c == '\\') esc = true
+                    else if (c == '"') inStr = false
+                } else {
+                    if (c == '"') inStr = true
+                    else if (c == '[') depth++
+                    else if (c == ']') { depth--; if (depth == 0) break }
+                }
+                j++
+            }
+            if (j >= result.length) break
+            result = result.substring(0, i) + "[]" + result.substring(j + 1)
+            idx = result.indexOf(needle, i + 2)
+        }
+        return result
+    }
+
     /** Parses an HTTP chunked body; returns the decoded bytes, or null if incomplete. */
-    private fun dechunk(data: ByteArray): ByteArray? {
-        val out = java.io.ByteArrayOutputStream()
+    private fun dechunk(data: ByteArray): ByteArray? {        val out = java.io.ByteArrayOutputStream()
         var pos = 0
         while (true) {
             var eol = -1
