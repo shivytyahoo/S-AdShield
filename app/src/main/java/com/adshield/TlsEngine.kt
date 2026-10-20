@@ -561,21 +561,24 @@ class MitmSession(
         val ctLine = lowerHeader.lines().firstOrNull { it.startsWith("content-type:") } ?: ""
         val isXml = ctLine.contains("application/xml") || ctLine.contains("text/xml") ||
             ctLine.contains("application/vast") || ctLine.contains("+xml") && !ctLine.contains("xhtml")
-        // HTML pages: filter embedded ad config (v0.8.13)
+        // HTML pages: filter embedded ad config (v0.8.13). JSON API
+        // responses: same cleaning (v0.8.17) — modern sites deliver player
+        // ad config and ad-spot widgets as JSON, not just in page HTML.
         val isHtml = ctLine.contains("text/html")
+        val isJson = ctLine.contains("json")
         val urlHint = target.lowercase().contains("vast") ||
             target.lowercase().contains("ima3")
         val bodyStart = foundEnd
         val bodyAlready = if (totalHeader > bodyStart) {
             temp.copyOfRange(bodyStart, totalHeader)
         } else ByteArray(0)
-        if (!isXml && !urlHint && !isHtml) {
+        if (!isXml && !urlHint && !isHtml && !isJson) {
             sendToClient(temp.copyOf(totalHeader))
             streamRest(inp, sendToClient)
             return
         }
-        if (isHtml) {
-            MitmDebug.log("HTML filter: cleaning ad config for ${target.take(80)}")
+        if (isHtml || isJson) {
+            MitmDebug.log("Content filter: cleaning ad config for ${target.take(80)}")
             filterHtmlResponse(inp, sendToClient, headerStr, temp, foundEnd, totalHeader)
             return
         }
@@ -722,7 +725,7 @@ class MitmSession(
             }
         } catch (_: Exception) {}
         if (!complete) {
-            MitmDebug.log("HTML filter: incomplete capture (chunked=$chunked), passing through")
+            MitmDebug.log("Content filter: incomplete capture (chunked=$chunked), passing through")
             sendToClient(temp.copyOf(totalHeader))
             val rest = raw.toByteArray()
             if (rest.size > bodyAlready.size) {
@@ -739,8 +742,30 @@ class MitmSession(
             sendToClient(bodyBytes)
             return
         }
-        // Strip ad URLs/config from the HTML/JS. Universal patterns.
-        var cleaned = html
+        val (cleaned, adCount) = cleanAdConfig(html)
+        MitmDebug.log("Content filter: removed $adCount ad URLs (chunked=$chunked, body=${bodyBytes.size}b)")
+        val cleanedBytes = cleaned.toByteArray(Charsets.UTF_8)
+        var newHeaders = headerStr.replace(
+            Regex("Transfer-Encoding: [^\r\n]*\r\n", RegexOption.IGNORE_CASE), "")
+        newHeaders = if (newHeaders.contains("content-length:", ignoreCase = true)) {
+            newHeaders.replace(
+                Regex("Content-Length: \\d+", RegexOption.IGNORE_CASE),
+                "Content-Length: ${cleanedBytes.size}")
+        } else {
+            newHeaders.trimEnd('\r', '\n') + "\r\nContent-Length: ${cleanedBytes.size}\r\n\r\n"
+        }
+        sendToClient(newHeaders.toByteArray(Charsets.US_ASCII))
+        sendToClient(cleanedBytes)
+    }
+
+    /**
+     * Strips embedded ad configuration from a text body (HTML page or JSON
+     * API response): VAST/ad URL fields, the TrafficJunky embed meta,
+     * vastUrls arrays, and any quoted URL carrying an ad marker (plain or
+     * \/-escaped). Universal — returns the cleaned text and removal count.
+     */
+    private fun cleanAdConfig(text: String): Pair<String, Int> {
+        var cleaned = text
         cleaned = cleaned.replace(
             Regex("\"(vastUrl|adUrl|prerollUrl|adTagUrl|vmapUrl)\"\\s*:\\s*\"https?://[^\"]+\"", RegexOption.IGNORE_CASE),
             "\"$1\":\"\""
@@ -751,9 +776,9 @@ class MitmSession(
         // Empty embedded VAST URL arrays (e.g. xHamster's vastUrls) so the
         // player has no VAST tag to fetch at all (v0.8.16).
         cleaned = emptyJsonArray(cleaned, "vastUrls")
-        // Null out ANY quoted ad-config URL by marker (plain or \/-escaped).
-        // Covers Pornhub's adRoll "json" (/_xa/ads) links, VAST tags on
-        // rotating ad domains, and ad-network URLs — universally.
+        // Null out ANY quoted ad-config URL by marker. Covers Pornhub's
+        // adRoll "json" (/_xa/ads) links, VAST tags on rotating ad domains,
+        // JSON ad-spot payloads, and ad-network URLs — universally.
         var adCount = 0
         val adUrlMarkers = listOf("/_xa/", "vast", "preroll", "trafficjunky",
             "trafficstars", "exoclick", "adsterra", "doubleclick",
@@ -768,19 +793,7 @@ class MitmSession(
                 "\"\""
             } else v
         }
-        MitmDebug.log("HTML filter: removed $adCount ad URLs (chunked=$chunked, body=${bodyBytes.size}b)")
-        val cleanedBytes = cleaned.toByteArray(Charsets.UTF_8)
-        var newHeaders = headerStr.replace(
-            Regex("Transfer-Encoding: [^\r\n]*\r\n", RegexOption.IGNORE_CASE), "")
-        newHeaders = if (newHeaders.contains("content-length:", ignoreCase = true)) {
-            newHeaders.replace(
-                Regex("Content-Length: \\d+", RegexOption.IGNORE_CASE),
-                "Content-Length: ${cleanedBytes.size}")
-        } else {
-            newHeaders.trimEnd('\r', '\n') + "\r\nContent-Length: ${cleanedBytes.size}\r\n\r\n"
-        }
-        sendToClient(newHeaders.toByteArray(Charsets.US_ASCII))
-        sendToClient(cleanedBytes)
+        return cleaned to adCount
     }
 
     /**
