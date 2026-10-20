@@ -669,9 +669,11 @@ class MitmSession(
     }
 
     /**
-     * HTML ad filter (v0.8.13): buffers HTML pages (up to 1MB) and removes
-     * embedded ad configuration (VAST URLs, ad server URLs). Universal —
-     * works on any site's HTML.
+     * HTML ad filter (v0.8.13, chunked support v0.8.14): buffers HTML pages
+     * (Content-Length OR chunked, up to ~1.5MB) and removes embedded ad
+     * configuration (ad-server URLs, TJ embed config). Universal — if the
+     * full body can't be captured safely, the response passes through
+     * untouched (never break a page).
      */
     private fun filterHtmlResponse(
         inp: java.io.InputStream,
@@ -681,48 +683,73 @@ class MitmSession(
         foundEnd: Int,
         totalHeader: Int
     ) {
+        val chunked = headerStr.contains("transfer-encoding:", ignoreCase = true) &&
+            headerStr.lowercase().contains("chunked")
         val contentLength = Regex("Content-Length: (\\d+)", RegexOption.IGNORE_CASE)
             .find(headerStr)?.groupValues?.get(1)?.toIntOrNull() ?: -1
-        // Only filter if we know the size and it's reasonable (< 1MB)
-        if (contentLength <= 0 || contentLength > 1024 * 1024) {
+        val bodyAlready = if (totalHeader > foundEnd) {
+            temp.copyOfRange(foundEnd, totalHeader)
+        } else ByteArray(0)
+        val limit = 1536 * 1024
+        if (!chunked && (contentLength <= 0 || contentLength > limit)) {
             sendToClient(temp.copyOf(totalHeader))
             streamRest(inp, sendToClient)
             return
         }
-        val bodyStart = foundEnd
-        val bodyAlready = if (totalHeader > bodyStart) {
-            temp.copyOfRange(bodyStart, totalHeader)
-        } else ByteArray(0)
-        val bodyOut = java.io.ByteArrayOutputStream()
-        bodyOut.write(bodyAlready)
-        var remaining = contentLength - bodyAlready.size
+        // Capture the raw body (bounded). If capture is incomplete, fall
+        // back to a clean pass-through of everything read so far + rest.
+        val raw = java.io.ByteArrayOutputStream()
+        raw.write(bodyAlready)
         val buf = ByteArray(32768)
+        var complete = false
         try {
-            while (remaining > 0) {
-                val toRead = minOf(buf.size, remaining)
-                val n = inp.read(buf, 0, toRead)
-                if (n <= 0) break
-                bodyOut.write(buf, 0, n)
-                remaining -= n
+            if (chunked) {
+                while (raw.size() < limit) {
+                    if (dechunk(raw.toByteArray()) != null) { complete = true; break }
+                    val n = inp.read(buf)
+                    if (n <= 0) { complete = dechunk(raw.toByteArray()) != null; break }
+                    raw.write(buf, 0, n)
+                }
+            } else {
+                var remaining = contentLength - bodyAlready.size
+                while (remaining > 0) {
+                    val n = inp.read(buf, 0, minOf(buf.size, remaining))
+                    if (n <= 0) break
+                    raw.write(buf, 0, n)
+                    remaining -= n
+                }
+                complete = remaining == 0
             }
         } catch (_: Exception) {}
-        val html = try { String(bodyOut.toByteArray(), Charsets.UTF_8) } catch (_: Exception) { "" }
-        if (html.isEmpty()) {
-            sendToClient(temp.copyOf(foundEnd))
-            sendToClient(bodyOut.toByteArray())
+        if (!complete) {
+            MitmDebug.log("HTML filter: incomplete capture (chunked=$chunked), passing through")
+            sendToClient(temp.copyOf(totalHeader))
+            val rest = raw.toByteArray()
+            if (rest.size > bodyAlready.size) {
+                sendToClient(rest.copyOfRange(bodyAlready.size, rest.size))
+            }
             streamRest(inp, sendToClient)
             return
         }
-        // Strip ad URLs from the HTML/JS config. Universal patterns.
+        val bodyBytes = if (chunked) dechunk(raw.toByteArray()) ?: raw.toByteArray()
+            else raw.toByteArray()
+        val html = try { String(bodyBytes, Charsets.UTF_8) } catch (_: Exception) { "" }
+        if (html.isEmpty()) {
+            sendToClient(temp.copyOf(foundEnd))
+            sendToClient(bodyBytes)
+            return
+        }
+        // Strip ad URLs/config from the HTML/JS. Universal patterns.
         var cleaned = html
-        // Remove VAST/ad URLs in JSON configs and JS variables
         cleaned = cleaned.replace(
             Regex("\"(vastUrl|adUrl|prerollUrl|adTagUrl|vmapUrl)\"\\s*:\\s*\"https?://[^\"]+\"", RegexOption.IGNORE_CASE),
             "\"$1\":\"\""
         )
-        // Remove ad server domains from inline content
-        val adDomains = listOf("doubleclick.net", "googlesyndication.com", "adservice.", "ads.")
-        // (Conservative: only null out URLs, don't remove blocks)
+        // TrafficJunky embed context meta: carries the display-ad payloads.
+        cleaned = cleaned.replace(
+            Regex("<meta[^>]*trafficjunky[^>]*>", RegexOption.IGNORE_CASE), "")
+        val adDomains = listOf("doubleclick.net", "googlesyndication.com", "adservice.",
+            "trafficjunky.net", "trafficjunky.com", "exoclick.com", "adsterra.com")
         var adCount = 0
         for (domain in adDomains) {
             val pattern = Regex("\"https?://[^\"]*" + Regex.escape(domain) + "[^\"]*\"", RegexOption.IGNORE_CASE)
@@ -732,19 +759,42 @@ class MitmSession(
                 adCount += matches
             }
         }
-        if (adCount > 0) {
-            MitmDebug.log("HTML filter: removed $adCount ad URLs")
-        }
+        MitmDebug.log("HTML filter: removed $adCount ad URLs (chunked=$chunked, body=${bodyBytes.size}b)")
         val cleanedBytes = cleaned.toByteArray(Charsets.UTF_8)
         var newHeaders = headerStr.replace(
-            Regex("Content-Length: \\d+", RegexOption.IGNORE_CASE),
-            "Content-Length: ${cleanedBytes.size}"
-        )
-        newHeaders = newHeaders.replace(
-            Regex("Transfer-Encoding: chunked\r\n", RegexOption.IGNORE_CASE),
-            ""
-        )
-        sendToClient((newHeaders + String(cleanedBytes, Charsets.UTF_8)).toByteArray(Charsets.UTF_8))
+            Regex("Transfer-Encoding: [^\r\n]*\r\n", RegexOption.IGNORE_CASE), "")
+        newHeaders = if (newHeaders.contains("content-length:", ignoreCase = true)) {
+            newHeaders.replace(
+                Regex("Content-Length: \\d+", RegexOption.IGNORE_CASE),
+                "Content-Length: ${cleanedBytes.size}")
+        } else {
+            newHeaders.trimEnd('\r', '\n') + "\r\nContent-Length: ${cleanedBytes.size}\r\n\r\n"
+        }
+        sendToClient(newHeaders.toByteArray(Charsets.US_ASCII))
+        sendToClient(cleanedBytes)
+    }
+
+    /** Parses an HTTP chunked body; returns the decoded bytes, or null if incomplete. */
+    private fun dechunk(data: ByteArray): ByteArray? {
+        val out = java.io.ByteArrayOutputStream()
+        var pos = 0
+        while (true) {
+            var eol = -1
+            var i = pos
+            while (i < data.size - 1) {
+                if (data[i] == 13.toByte() && data[i + 1] == 10.toByte()) { eol = i; break }
+                i++
+            }
+            if (eol < 0) return null
+            val sizeStr = String(data, pos, eol - pos, Charsets.US_ASCII)
+                .trim().substringBefore(';')
+            val size = sizeStr.toIntOrNull(16) ?: return null
+            if (size == 0) return out.toByteArray()
+            if (eol + 2 + size > data.size) return null
+            out.write(data, eol + 2, size)
+            pos = eol + 2 + size + 2 // skip chunk data + trailing CRLF
+            if (pos > data.size) return null
+        }
     }
 
     private fun finish() {
