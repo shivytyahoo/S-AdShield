@@ -154,9 +154,14 @@ object StubHttpServer {
     /** Raw empty VAST bytes for the universal filter. */
     fun emptyVastBytes(): ByteArray = EMPTY_VAST.toByteArray(Charsets.US_ASCII)
 
-    /** Empty JSON "no ads" response for JSON ad endpoints (preroll_type=json). */
+    /**
+     * Empty JSON "no ads" response for JSON ad endpoints (preroll_type=json).
+     * Pornhub/TJ schema uses a top-level "ad" object — returning {} (no "ad"
+     * key) is the correct no-fill signal. (v0.8.15: was {"ads":[]}, which the
+     * player treated as malformed and fell back to a house/fallback ad.)
+     */
     fun jsonNoAdsResponse(): ByteArray {
-        val json = "{\"ads\":[],\"status\":\"ok\"}"
+        val json = "{}"
         return http(200, "OK", "application/json", json.toByteArray(Charsets.US_ASCII))
     }
 
