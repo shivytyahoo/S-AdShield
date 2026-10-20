@@ -479,7 +479,10 @@ class MitmSession(
         }
         try {
             val out = upstream.getOutputStream()
-            out.write(rawHead)
+            // Force plaintext responses (v0.8.13): strip Accept-Encoding so
+            // HTML comes uncompressed and we can filter embedded ad config.
+            val plainHead = stripAcceptEncoding(rawHead)
+            out.write(plainHead)
             out.flush()
             val inp = upstream.getInputStream()
             // Universal VAST detector (v0.8.11): read response headers first.
@@ -558,15 +561,22 @@ class MitmSession(
         val ctLine = lowerHeader.lines().firstOrNull { it.startsWith("content-type:") } ?: ""
         val isXml = ctLine.contains("application/xml") || ctLine.contains("text/xml") ||
             ctLine.contains("application/vast") || ctLine.contains("+xml") && !ctLine.contains("xhtml")
+        // HTML pages: filter embedded ad config (v0.8.13)
+        val isHtml = ctLine.contains("text/html")
         val urlHint = target.lowercase().contains("vast") ||
             target.lowercase().contains("ima3")
         val bodyStart = foundEnd
         val bodyAlready = if (totalHeader > bodyStart) {
             temp.copyOfRange(bodyStart, totalHeader)
         } else ByteArray(0)
-        if (!isXml && !urlHint) {
+        if (!isXml && !urlHint && !isHtml) {
             sendToClient(temp.copyOf(totalHeader))
             streamRest(inp, sendToClient)
+            return
+        }
+        if (isHtml) {
+            MitmDebug.log("HTML filter: cleaning ad config for ${target.take(80)}")
+            filterHtmlResponse(inp, sendToClient, headerStr, temp, foundEnd, totalHeader)
             return
         }
         MitmDebug.log("VAST filter: buffering response for ${target.take(80)}")
@@ -633,6 +643,108 @@ class MitmSession(
                 sendToClient(buf.copyOf(n))
             }
         } catch (_: Exception) {}
+    }
+
+    /**
+     * Strips Accept-Encoding from the request head so upstream sends
+     * uncompressed responses (v0.8.13). This lets the HTML ad filter
+     * inspect and clean page content.
+     */
+    private fun stripAcceptEncoding(rawHead: ByteArray): ByteArray {
+        try {
+            val headStr = String(rawHead, Charsets.US_ASCII)
+            val lines = headStr.split("\r\n").toMutableList()
+            var changed = false
+            for (i in lines.indices) {
+                if (lines[i].lowercase().startsWith("accept-encoding:")) {
+                    lines[i] = "Accept-Encoding: identity"
+                    changed = true
+                }
+            }
+            return if (changed) lines.joinToString("\r\n").toByteArray(Charsets.US_ASCII)
+            else rawHead
+        } catch (_: Exception) {
+            return rawHead
+        }
+    }
+
+    /**
+     * HTML ad filter (v0.8.13): buffers HTML pages (up to 1MB) and removes
+     * embedded ad configuration (VAST URLs, ad server URLs). Universal —
+     * works on any site's HTML.
+     */
+    private fun filterHtmlResponse(
+        inp: java.io.InputStream,
+        sendToClient: (ByteArray) -> Unit,
+        headerStr: String,
+        temp: ByteArray,
+        foundEnd: Int,
+        totalHeader: Int
+    ) {
+        val contentLength = Regex("Content-Length: (\\d+)", RegexOption.IGNORE_CASE)
+            .find(headerStr)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+        // Only filter if we know the size and it's reasonable (< 1MB)
+        if (contentLength <= 0 || contentLength > 1024 * 1024) {
+            sendToClient(temp.copyOf(totalHeader))
+            streamRest(inp, sendToClient)
+            return
+        }
+        val bodyStart = foundEnd
+        val bodyAlready = if (totalHeader > bodyStart) {
+            temp.copyOfRange(bodyStart, totalHeader)
+        } else ByteArray(0)
+        val bodyOut = java.io.ByteArrayOutputStream()
+        bodyOut.write(bodyAlready)
+        var remaining = contentLength - bodyAlready.size
+        val buf = ByteArray(32768)
+        try {
+            while (remaining > 0) {
+                val toRead = minOf(buf.size, remaining)
+                val n = inp.read(buf, 0, toRead)
+                if (n <= 0) break
+                bodyOut.write(buf, 0, n)
+                remaining -= n
+            }
+        } catch (_: Exception) {}
+        val html = try { String(bodyOut.toByteArray(), Charsets.UTF_8) } catch (_: Exception) { "" }
+        if (html.isEmpty()) {
+            sendToClient(temp.copyOf(foundEnd))
+            sendToClient(bodyOut.toByteArray())
+            streamRest(inp, sendToClient)
+            return
+        }
+        // Strip ad URLs from the HTML/JS config. Universal patterns.
+        var cleaned = html
+        // Remove VAST/ad URLs in JSON configs and JS variables
+        cleaned = cleaned.replace(
+            Regex("\"(vastUrl|adUrl|prerollUrl|adTagUrl|vmapUrl)\"\\s*:\\s*\"https?://[^\"]+\"", RegexOption.IGNORE_CASE),
+            "\"$1\":\"\""
+        )
+        // Remove ad server domains from inline content
+        val adDomains = listOf("doubleclick.net", "googlesyndication.com", "adservice.", "ads.")
+        // (Conservative: only null out URLs, don't remove blocks)
+        var adCount = 0
+        for (domain in adDomains) {
+            val pattern = Regex("\"https?://[^\"]*" + Regex.escape(domain) + "[^\"]*\"", RegexOption.IGNORE_CASE)
+            val matches = pattern.findAll(cleaned).count()
+            if (matches > 0) {
+                cleaned = pattern.replace(cleaned, "\"\"")
+                adCount += matches
+            }
+        }
+        if (adCount > 0) {
+            MitmDebug.log("HTML filter: removed $adCount ad URLs")
+        }
+        val cleanedBytes = cleaned.toByteArray(Charsets.UTF_8)
+        var newHeaders = headerStr.replace(
+            Regex("Content-Length: \\d+", RegexOption.IGNORE_CASE),
+            "Content-Length: ${cleanedBytes.size}"
+        )
+        newHeaders = newHeaders.replace(
+            Regex("Transfer-Encoding: chunked\r\n", RegexOption.IGNORE_CASE),
+            ""
+        )
+        sendToClient((newHeaders + String(cleanedBytes, Charsets.UTF_8)).toByteArray(Charsets.UTF_8))
     }
 
     private fun finish() {
