@@ -90,10 +90,15 @@ class AdShieldVpnService : VpnService() {
 
     private fun mitmDomains(): List<String> = try {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        // v0.9.0 "Universal": one-time merge of the embedded site list
-        // into the user's MITM domains (their own entries keep priority
-        // and everything stays editable in the app afterwards).
-        if (!prefs.getBoolean(KEY_EMBEDDED_MERGED, false)) {
+        // v0.9.0 "Universal": merge the embedded site list into the
+        // user's MITM domains (their own entries keep priority and
+        // everything stays editable in the app afterwards). v0.9.3:
+        // versioned, so list additions in later builds merge again.
+        val mergedVer = prefs.getInt(
+            KEY_EMBEDDED_VER,
+            if (prefs.getBoolean(KEY_EMBEDDED_MERGED, false)) 1 else 0
+        )
+        if (mergedVer < EMBEDDED_LIST_VERSION) {
             val cur = (prefs.getString(KEY_MITM_DOMAINS, DEFAULT_MITM_DOMAINS)
                 ?: DEFAULT_MITM_DOMAINS)
                 .split(",").map { it.trim().lowercase() }
@@ -102,6 +107,7 @@ class AdShieldVpnService : VpnService() {
             prefs.edit()
                 .putString(KEY_MITM_DOMAINS, merged.joinToString(","))
                 .putBoolean(KEY_EMBEDDED_MERGED, true)
+                .putInt(KEY_EMBEDDED_VER, EMBEDDED_LIST_VERSION)
                 .apply()
         }
         val raw = prefs.getString(KEY_MITM_DOMAINS, DEFAULT_MITM_DOMAINS) ?: DEFAULT_MITM_DOMAINS
@@ -804,6 +810,7 @@ class AdShieldVpnService : VpnService() {
         const val KEY_MITM_RULES = "mitm_rules"
         const val KEY_MITM_CA_DONE = "mitm_ca_done"
         const val KEY_EMBEDDED_MERGED = "embedded_v090_merged"
+        const val KEY_EMBEDDED_VER = "embedded_list_ver"
         const val DEFAULT_MITM_DOMAINS = "pornhub.org,pornhub.com"
         private const val MITM_IP_THIRD_BASE = 20
         private const val MAX_MITM_DOMAINS = 1024

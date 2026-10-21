@@ -7,11 +7,18 @@ package com.adshield
  * HTTPS cleaning + in-page protection works on all of them out of the
  * box — no per-site setup. The list stays fully editable in the app.
  *
+ * v0.9.3: imggle.net (sextb's poster CDN) added — it publishes an ECH
+ * record, so with the VPN off Chrome hides its SNI behind ECH and the
+ * carrier lets it through; with plain VPN DNS the SNI is visible and
+ * the carrier cuts the connection. Serving it through the MITM relay
+ * takes the browser's fragile ECH path out of the loop.
+ *
  * Deliberately EXCLUDED: creator/payment platforms (OnlyFans, Fansly,
  * ManyVids, Clips4Sale) where interception could disturb purchases,
  * uploads or creator logins — the generic DNS shield still covers
  * their ad/tracker domains.
  */
+const val EMBEDDED_LIST_VERSION = 2
 val EMBEDDED_MITM_DOMAINS: List<String> = listOf(
     // Mega tubes (Aylo network + independents)
     "pornhub.com", "pornhub.org", "redtube.com", "youporn.com", "tube8.com",
@@ -26,7 +33,8 @@ val EMBEDDED_MITM_DOMAINS: List<String> = listOf(
     "ixxx.com", "txxx.com", "upornia.com", "hclips.com", "ok.xxx",
     "porn300.com", "veporn.com", "h2porn.com", "dinotube.com", "gotporn.com",
     "userporn.com", "porntube.com", "moviefap.com", "playvid.com",
-    "sextb.net", "camwhores.tv", "maturetube.com", "ashemaletube.com",
+    "sextb.net", "cdn001.imggle.net", "cdn002.imggle.net", "imggle.net",
+    "camwhores.tv", "maturetube.com", "ashemaletube.com",
     "pornhost.com", "alohatube.com", "fantasti.cc", "efukt.com",
     "tubegalore.com", "xxxbunker.com", "perfectgirls.net", "imagefap.com",
     "sxyprn.com", "tubepornclassic.com", "faphouse.com",
