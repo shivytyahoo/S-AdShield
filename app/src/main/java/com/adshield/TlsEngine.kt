@@ -909,6 +909,24 @@ class MitmSession(
                 .replace("\\\"domain\\\":\\\"$host\\\"", "\\\"domain\\\":\\\"\\\"")
             if (cleaned !== before) adCount++
         }
+        // Spot IDs are the master key (v0.8.23): whatever domain the ad SDK
+        // loads from (incl. fallbacks), with an empty spot id it can fetch
+        // no creative at all. TS spot ids are 16+ hex chars in a "spot"
+        // field; xh_spot_id is the same id echoed inside tracking payloads.
+        val spotCount = Regex("\"spot\"\\s*:\\s*\"[0-9a-f]{16,}\"", RegexOption.IGNORE_CASE)
+            .findAll(cleaned).count()
+        if (spotCount > 0) {
+            adCount += spotCount
+            cleaned = cleaned.replace(
+                Regex("\"spot\"\\s*:\\s*\"[0-9a-f]{16,}\"", RegexOption.IGNORE_CASE),
+                "\"spot\":\"\"")
+            cleaned = cleaned.replace(
+                Regex("\"xh_spot_id\"\\s*:\\s*\"[0-9a-f]{16,}\"", RegexOption.IGNORE_CASE),
+                "\"xh_spot_id\":\"\"")
+            cleaned = cleaned.replace(
+                Regex("""\\"xh_spot_id\\":\\"[0-9a-f]{16,}\\"""", RegexOption.IGNORE_CASE),
+                "\\\"xh_spot_id\\\":\\\"\\\"")
+        }
         // Empty embedded VAST URL arrays (e.g. xHamster's vastUrls) so the
         // player has no VAST tag to fetch at all (v0.8.16).
         cleaned = emptyJsonArray(cleaned, "vastUrls")
