@@ -526,6 +526,16 @@ class AdShieldVpnService : VpnService() {
         )
     }
 
+    /** v0.9.2 diagnostic: one compact line per DNS decision, so a shared
+     * log shows exactly what happened to any name (e.g. a thumbnail CDN
+     * whose queries never reach the forwarder at all). */
+    private fun dnsLog(question: DnsQuestion?, verdict: String, extra: String = "") {
+        try {
+            val q = question ?: return
+            MitmDebug.log("DNS ${q.name} t=${q.qType} -> $verdict$extra")
+        } catch (_: Exception) {}
+    }
+
     private fun handleDns(query: DnsQuery) {
         val question = DnsPacket.parseQuestion(query.payload, query.payload.size)
         // HTTPS path filter MITM (v0.8.0): listed domains resolve to their
@@ -535,6 +545,7 @@ class AdShieldVpnService : VpnService() {
             val mitmIp = mitmIpFor(question.name)
             if (mitmIp != null) {
                 recordQuery(false)
+                dnsLog(question, "MITM")
                 val response = when (question.qType) {
                     1 -> DnsPacket.surrogateResponse(query.payload, query.payload.size, mitmIp)
                     28 -> DnsPacket.emptyResponse(query.payload, query.payload.size)
@@ -547,6 +558,7 @@ class AdShieldVpnService : VpnService() {
         val hit = question != null && AdBlocker.isBlocked(question.name)
         recordQuery(hit)
         if (hit) {
+            dnsLog(question, "BLOCK")
             // Anti-detect mode: answer A queries for blocked domains with
             // the local stub IP so bait requests *succeed* (empty surrogate
             // content) instead of failing and tripping "Ad blocker
@@ -570,6 +582,7 @@ class AdShieldVpnService : VpnService() {
             val entry = dnsCache[key]
             if (entry != null) {
                 if (entry.expiresAtMs > System.currentTimeMillis()) {
+                    dnsLog(question, "CACHE")
                     val cached = entry.response.copyOf()
                     if (cached.size >= 2 && query.payload.size >= 2) {
                         cached[0] = query.payload[0]
@@ -581,7 +594,15 @@ class AdShieldVpnService : VpnService() {
                 dnsCache.remove(key, entry)
             }
         }
-        val upstream = queryUpstream(query.payload) ?: return // no reply -> resolver retries
+        val upstream = queryUpstream(query.payload) ?: run {
+            dnsLog(question, "FWD-FAIL")
+            return // no reply -> resolver retries
+        }
+        run {
+            val rcode = if (upstream.size > 3) upstream[3].toInt() and 0x0F else -1
+            val an = if (upstream.size > 7) u16(upstream, 6) else -1
+            dnsLog(question, "FWD", " rcode=$rcode an=$an")
+        }
         if (key != null) {
             if (dnsCache.size > 512) dnsCache.clear()
             val ttlMs = responseTtlSeconds(upstream) * 1000L

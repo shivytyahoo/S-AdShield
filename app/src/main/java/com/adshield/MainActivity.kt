@@ -280,7 +280,7 @@ class MainActivity : Activity() {
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  S-AdShield v0.9.1"
+            text = "Developed with love by Shiv  •  S-AdShield v0.9.2"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))
@@ -543,7 +543,7 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Log khaali hai — pehle MITM ON karke site kholo", Toast.LENGTH_LONG).show()
                 return
             }
-            val content = logFile.readText().take(8000)
+            val content = logFile.readText().take(60000)
             val tv = TextView(this).apply {
                 text = content
                 textSize = 10f
