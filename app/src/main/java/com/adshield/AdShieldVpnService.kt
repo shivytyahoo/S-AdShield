@@ -89,8 +89,22 @@ class AdShieldVpnService : VpnService() {
     }
 
     private fun mitmDomains(): List<String> = try {
-        val raw = getSharedPreferences(PREFS, MODE_PRIVATE)
-            .getString(KEY_MITM_DOMAINS, DEFAULT_MITM_DOMAINS) ?: DEFAULT_MITM_DOMAINS
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        // v0.9.0 "Universal": one-time merge of the embedded site list
+        // into the user's MITM domains (their own entries keep priority
+        // and everything stays editable in the app afterwards).
+        if (!prefs.getBoolean(KEY_EMBEDDED_MERGED, false)) {
+            val cur = (prefs.getString(KEY_MITM_DOMAINS, DEFAULT_MITM_DOMAINS)
+                ?: DEFAULT_MITM_DOMAINS)
+                .split(",").map { it.trim().lowercase() }
+                .filter { it.isNotEmpty() && it.contains(".") }
+            val merged = (cur + EMBEDDED_MITM_DOMAINS).distinct()
+            prefs.edit()
+                .putString(KEY_MITM_DOMAINS, merged.joinToString(","))
+                .putBoolean(KEY_EMBEDDED_MERGED, true)
+                .apply()
+        }
+        val raw = prefs.getString(KEY_MITM_DOMAINS, DEFAULT_MITM_DOMAINS) ?: DEFAULT_MITM_DOMAINS
         raw.split(",").map { it.trim().lowercase() }
             .filter { it.isNotEmpty() && it.contains(".") }
             .distinct().take(MAX_MITM_DOMAINS)
@@ -107,14 +121,15 @@ class AdShieldVpnService : VpnService() {
         PathRules.DEFAULT_BLOCKED_PATHS
     }
 
-    /** Build domain -> MITM IP bytes, in pref order. */
+    /** Build domain -> MITM IP bytes, in pref order. v0.9.0: IPs span
+     * 10.10.20.1 upward (250 per third octet) so the universal embedded
+     * list fits; 10.10.10.x stays reserved for DNS (.1) and the stub (.3). */
     private fun buildMitmMap(): Map<String, ByteArray> {
         val map = LinkedHashMap<String, ByteArray>()
-        var fourth = MITM_IP_BASE_FOURTH
-        for (d in mitmDomains()) {
-            if (fourth > 250) break
-            map[d] = byteArrayOf(10, 10, 10, fourth.toByte())
-            fourth++
+        for ((i, d) in mitmDomains().withIndex()) {
+            val third = MITM_IP_THIRD_BASE + i / 250
+            if (third > 240) break
+            map[d] = byteArrayOf(10, 10, third.toByte(), (1 + i % 250).toByte())
         }
         return map
     }
@@ -767,10 +782,10 @@ class AdShieldVpnService : VpnService() {
         const val KEY_MITM_DOMAINS = "mitm_domains"
         const val KEY_MITM_RULES = "mitm_rules"
         const val KEY_MITM_CA_DONE = "mitm_ca_done"
+        const val KEY_EMBEDDED_MERGED = "embedded_v090_merged"
         const val DEFAULT_MITM_DOMAINS = "pornhub.org,pornhub.com"
-        private const val MITM_IP_THIRD = 10
-        private const val MITM_IP_BASE_FOURTH = 4
-        private const val MAX_MITM_DOMAINS = 16
+        private const val MITM_IP_THIRD_BASE = 20
+        private const val MAX_MITM_DOMAINS = 1024
         // Well-known public DNS resolver IPs hijacked into the TUN (v0.6.0)
         // so hardcoded-DNS and encrypted-DNS bypass attempts hit this engine.
         private val PUBLIC_RESOLVER_IPS = listOf(

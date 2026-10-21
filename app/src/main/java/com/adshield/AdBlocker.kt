@@ -118,6 +118,15 @@ object AdBlocker {
             }
             if (lines.isNotEmpty()) loadDomains(lines)
             try {
+                loadAllowlist(
+                    context.assets.open("allowlist.txt")
+                        .bufferedReader(Charsets.US_ASCII)
+                        .readLines()
+                )
+            } catch (_: Exception) {
+                // Optional asset: no allowlist.
+            }
+            try {
                 loadStreamingDomains(
                     context.assets.open("streaming_blocklist.txt")
                         .bufferedReader(Charsets.US_ASCII)
@@ -160,6 +169,21 @@ object AdBlocker {
         streamingBlocked = parseDomainSet(lines)
     }
 
+    /**
+     * v0.9.0: functionality allowlist — domains a site's own features are
+     * welded to (e.g. AdSpyglass, whose JS drives sextb-style players and
+     * lazy thumbnails; blocking it at DNS broke the sites themselves).
+     * Allowed domains resolve normally; their ads are fought at the
+     * MITM layer instead (config cleaning, popunder trap, path rules).
+     */
+    @Volatile
+    private var allowed: Set<String> = emptySet()
+
+    /** Replaces the allowlist set. Visible for JVM tests. */
+    fun loadAllowlist(lines: Iterable<String>) {
+        allowed = parseDomainSet(lines)
+    }
+
     private fun parseDomainSet(lines: Iterable<String>): HashSet<String> {
         val parsed = HashSet<String>()
         for (raw in lines) {
@@ -179,6 +203,7 @@ object AdBlocker {
      */
     fun isBlocked(host: String): Boolean {
         val h = host.trim().trim('.').lowercase(Locale.US)
+        if (matches(allowed, h)) return false
         if (matches(blocked, h)) return true
         if (streamingEnabled && matches(streamingBlocked, h)) return true
         return false

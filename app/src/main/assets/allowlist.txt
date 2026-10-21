@@ -1,0 +1,11 @@
+# S-AdShield v0.9.0 — functionality allowlist.
+# Domains listed here are NEVER DNS-blocked, even if a blocklist contains
+# them: some sites weld their own features (player buttons, lazy-loaded
+# thumbnails, menus) to these services' JavaScript, so blocking the domain
+# breaks the site itself — worse than the ads. Their ads are fought at the
+# MITM layer instead (config cleaning, popunder trap, path rules).
+#
+# AdSpyglass: sextb.net & many small tubes run their player/thumbnail JS
+# through it (verified 2026-10-21: hagezi list blocks adspyglass.com and
+# the sites' streaming options + thumbnails die with protection on).
+adspyglass.com

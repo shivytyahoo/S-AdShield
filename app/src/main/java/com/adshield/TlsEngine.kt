@@ -877,7 +877,7 @@ class MitmSession(
         // and is often protocol-relative, so match by the KEY context and
         // empty the url value whatever domain/path it uses.
         val popObj = Regex(
-            "(\"(?:[^\"]*(?:popunder|popup|pop_under)[^\"]*)\"\\s*:\\s*\\{[^{}]*?\"url\"\\s*:\\s*\")(?:https?:)?//[^\"]*(\")",
+            "(\"(?:[^\"]*(?:popunder|pop_under)[^\"]*)\"\\s*:\\s*\\{[^{}]*?\"url\"\\s*:\\s*\")(?:https?:)?//[^\"]*(\")",
             RegexOption.IGNORE_CASE)
         cleaned = popObj.replace(cleaned) { m ->
             adCount++
