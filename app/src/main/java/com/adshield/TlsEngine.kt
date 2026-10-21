@@ -25,7 +25,7 @@ private val INJECT_BUNDLE: String =
     "iframe[src*=\"trafficstars\"],iframe[src*=\"syndicate\"],iframe[src*=\"exoclick\"]," +
     "iframe[src*=\"adsterra\"],iframe[src*=\"trafficjunky\"]," +
     "[class*=\"popunder\"],[id*=\"popunder\"]," +
-    ".ad-banner,.ads-banner,.banner-ad,.ad-container,.ads-container,.ad-wrapper" +
+    ".ad-banner,.ads-banner,.banner-ad" +
     "{display:none!important;visibility:hidden!important}</style>" +
     "<script>(function(){\"use strict\";try{" +
     "var M=[\"syndicate\",\"trafficstars\",\"trafficjunky\",\"exoclick\",\"adsterra\",\"doubleclick\",\"googlesyndication\",\"/v1/direct/\",\"popunder\",\"adserver\",\"adsbygoogle\"];" +
@@ -36,7 +36,7 @@ private val INJECT_BUNDLE: String =
     "if(isAd(url))return decoy(url);" +
     "if(url){var a=document.createElement(\"a\");a.href=url;if(a.hostname&&a.hostname!==location.hostname&&!window.__asNav)return decoy(url);}" +
     "}catch(e){}return realOpen?realOpen.apply(window,arguments):null;};" +
-    "document.addEventListener(\"click\",function(ev){try{var t=ev.target;var a=t&&t.closest?t.closest(\"a[href]\"):null;if(a){window.__asNav=true;setTimeout(function(){window.__asNav=false;},1500);}}catch(e){}},true);" +
+    "document.addEventListener(\"click\",function(ev){try{var t=ev.target;var a=t&&t.closest?t.closest(\"a[href],button,[role=button],input,select,textarea,label\"):null;if(a){window.__asNav=true;setTimeout(function(){window.__asNav=false;},1500);}}catch(e){}},true);" +
     "var SEL=\"iframe[src*=trafficstars],iframe[src*=syndicate],iframe[src*=exoclick],iframe[src*=doubleclick],iframe[src*=googlesyndication],iframe[src*=adsterra],iframe[src*=trafficjunky],ins.adsbygoogle,[class*=popunder],[id*=popunder]\";" +
     "function kill(el){try{el.style.setProperty(\"display\",\"none\",\"important\");el.remove();}catch(e){}}" +
     "function sweep(root){try{var list=(root||document).querySelectorAll(SEL);for(var i=0;i<list.length;i++)kill(list[i]);}catch(e){}}" +
