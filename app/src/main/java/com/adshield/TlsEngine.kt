@@ -690,18 +690,30 @@ class MitmSession(
     }
 
     /**
-     * Strips Accept-Encoding from the request head so upstream sends
-     * uncompressed responses (v0.8.13). This lets the HTML ad filter
-     * inspect and clean page content.
+     * Normalises the request head (v0.8.13, cache-defeat v0.8.21):
+     *  - Accept-Encoding forced to identity so upstream sends uncompressed
+     *    responses the ad filter can inspect.
+     *  - Conditional headers (If-None-Match / If-Modified-Since / If-Range)
+     *    removed so the upstream always returns a fresh 200 body instead
+     *    of a 304 that would resurrect a stale, pre-filter cached page
+     *    (with live ad config) in the browser.
      */
     private fun stripAcceptEncoding(rawHead: ByteArray): ByteArray {
         try {
             val headStr = String(rawHead, Charsets.US_ASCII)
             val lines = headStr.split("\r\n").toMutableList()
             var changed = false
-            for (i in lines.indices) {
-                if (lines[i].lowercase().startsWith("accept-encoding:")) {
-                    lines[i] = "Accept-Encoding: identity"
+            val it = lines.listIterator()
+            while (it.hasNext()) {
+                val lower = it.next().lowercase()
+                if (lower.startsWith("accept-encoding:")) {
+                    it.set("Accept-Encoding: identity")
+                    changed = true
+                } else if (lower.startsWith("if-none-match:") ||
+                    lower.startsWith("if-modified-since:") ||
+                    lower.startsWith("if-unmodified-since:") ||
+                    lower.startsWith("if-range:")) {
+                    it.remove()
                     changed = true
                 }
             }
@@ -804,6 +816,18 @@ class MitmSession(
             newHeaders = newHeaders.replace(
                 Regex("Content-Security-Policy[^:]*: [^\r\n]*\r\n", RegexOption.IGNORE_CASE), "")
         }
+        if (isHtmlPage) {
+            // Never let the browser store the page: a stored copy can be
+            // revalidated/resurrected later, and anything cached before
+            // filtering (or with protection off) carries live ad config.
+            newHeaders = if (newHeaders.contains("cache-control:", ignoreCase = true)) {
+                newHeaders.replace(
+                    Regex("Cache-Control: [^\r\n]*", RegexOption.IGNORE_CASE),
+                    "Cache-Control: no-store")
+            } else {
+                newHeaders.trimEnd('\r', '\n') + "\r\nCache-Control: no-store\r\n\r\n"
+            }
+        }
         newHeaders = if (newHeaders.contains("content-length:", ignoreCase = true)) {
             newHeaders.replace(
                 Regex("Content-Length: \\d+", RegexOption.IGNORE_CASE),
@@ -862,6 +886,29 @@ class MitmSession(
         // TrafficJunky embed context meta: carries the display-ad payloads.
         cleaned = cleaned.replace(
             Regex("<meta[^>]*trafficjunky[^>]*>", RegexOption.IGNORE_CASE), "")
+        // Rotating ad-delivery domains (v0.8.22): TrafficStars-style spot
+        // configs announce TODAY's delivery domain inside the page itself
+        // ({"spot":"<hex>", ..., "domain":"rotating-example.com"}) — that is
+        // why static blocklists never catch them. Collect any host declared
+        // next to a spot id, empty the declared value (runtime-built SDK
+        // URLs break), and blank literal URLs on that host below.
+        val rotatingHosts = LinkedHashSet<String>()
+        for (sm in Regex("\"spot\"\\s*:\\s*\"[0-9a-f]{16,}\"").findAll(cleaned)) {
+            val win = cleaned.substring(
+                maxOf(0, sm.range.first - 300),
+                minOf(cleaned.length, sm.range.last + 900))
+            for (dm in Regex("\"domain\"\\s*:\\s*\"([a-z0-9.-]+\\.[a-z]{2,})\"").findAll(win)) {
+                rotatingHosts.add(dm.groupValues[1].lowercase())
+            }
+        }
+        for (host in rotatingHosts) {
+            val before = cleaned
+            cleaned = cleaned
+                .replace("\"domain\":\"$host\"", "\"domain\":\"\"")
+                .replace("\"domain\": \"$host\"", "\"domain\": \"\"")
+                .replace("\\\"domain\\\":\\\"$host\\\"", "\\\"domain\\\":\\\"\\\"")
+            if (cleaned !== before) adCount++
+        }
         // Empty embedded VAST URL arrays (e.g. xHamster's vastUrls) so the
         // player has no VAST tag to fetch at all (v0.8.16).
         cleaned = emptyJsonArray(cleaned, "vastUrls")
@@ -871,13 +918,16 @@ class MitmSession(
         // exempted whole ad configs. A URL run is scheme + "//" (plain or
         // \/-escaped, or protocol-relative) up to the next delimiter.
         val adUrlMarkers = listOf("/_xa/", "vast", "preroll", "trafficjunky",
-            "trafficstars", "syndicate", "popunder", "/v1/direct/",
+            "trafficstars", "syndicate", "popunder", "/v1/direct/", ".spot.js",
             "exoclick", "adsterra", "doubleclick",
             "googlesyndication", "adservice.", "adserver")
         val urlRun = Regex("""(?:https?:)?(?:[\\/]{2})[^\s"'`<>()]+""")
         cleaned = urlRun.replace(cleaned) { m ->
             val norm = m.value.replace("\\/", "/").lowercase()
-            if (adUrlMarkers.any { norm.contains(it) }) {
+            val onRotating = rotatingHosts.any {
+                norm.contains("//$it") || norm.contains(".$it")
+            }
+            if (onRotating || adUrlMarkers.any { norm.contains(it) }) {
                 adCount++
                 ""
             } else m.value
