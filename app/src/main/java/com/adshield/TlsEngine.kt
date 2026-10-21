@@ -10,6 +10,41 @@ import javax.net.ssl.SSLEngine
 import javax.net.ssl.SSLEngineResult
 
 /**
+ * uBlock-style in-page bundle (v0.8.20), injected into HTML pages on
+ * MITM domains. Three layers adapted from uBlock Origin's techniques:
+ * generic cosmetic CSS (hide known ad containers), a no-window-open
+ * scriptlet with a decoy window (popunders/popups get a fake 1px iframe
+ * window instead of a real tab), and a MutationObserver DOM sweeper
+ * (removes ad elements the page inserts dynamically, SPA-style).
+ * Plain ES5, no template literals, fully self-defensive.
+ */
+private val INJECT_BUNDLE: String =
+    "<!-- adshield-ubo v1 --><style>" +
+    ".adsbygoogle,ins.adsbygoogle,div[id^=\"div-gpt-ad\"],iframe[id^=\"google_ads\"]," +
+    "iframe[src*=\"doubleclick\"],iframe[src*=\"googlesyndication\"]," +
+    "iframe[src*=\"trafficstars\"],iframe[src*=\"syndicate\"],iframe[src*=\"exoclick\"]," +
+    "iframe[src*=\"adsterra\"],iframe[src*=\"trafficjunky\"]," +
+    "[class*=\"popunder\"],[id*=\"popunder\"]," +
+    ".ad-banner,.ads-banner,.banner-ad,.ad-container,.ads-container,.ad-wrapper" +
+    "{display:none!important;visibility:hidden!important}</style>" +
+    "<script>(function(){\"use strict\";try{" +
+    "var M=[\"syndicate\",\"trafficstars\",\"trafficjunky\",\"exoclick\",\"adsterra\",\"doubleclick\",\"googlesyndication\",\"/v1/direct/\",\"popunder\",\"adserver\",\"adsbygoogle\"];" +
+    "function isAd(u){if(!u)return false;u=(\"\"+u).toLowerCase();for(var i=0;i<M.length;i++){if(u.indexOf(M[i])>=0)return true;}return false;}" +
+    "var realOpen=window.open;" +
+    "function decoy(url){try{var f=document.createElement(\"iframe\");f.src=\"about:blank\";f.style.cssText=\"position:fixed;top:-1px;left:-1px;width:1px;height:1px;border:0\";(document.body||document.documentElement).appendChild(f);var w=f.contentWindow;try{Object.defineProperty(w,\"closed\",{value:false});}catch(e){}setTimeout(function(){try{f.remove();}catch(e){}},4000);return w;}catch(e){return{closed:false,focus:function(){},blur:function(){},close:function(){}};}}" +
+    "window.open=function(url,name,feats){try{" +
+    "if(isAd(url))return decoy(url);" +
+    "if(url){var a=document.createElement(\"a\");a.href=url;if(a.hostname&&a.hostname!==location.hostname&&!window.__asNav)return decoy(url);}" +
+    "}catch(e){}return realOpen?realOpen.apply(window,arguments):null;};" +
+    "document.addEventListener(\"click\",function(ev){try{var t=ev.target;var a=t&&t.closest?t.closest(\"a[href]\"):null;if(a){window.__asNav=true;setTimeout(function(){window.__asNav=false;},1500);}}catch(e){}},true);" +
+    "var SEL=\"iframe[src*=trafficstars],iframe[src*=syndicate],iframe[src*=exoclick],iframe[src*=doubleclick],iframe[src*=googlesyndication],iframe[src*=adsterra],iframe[src*=trafficjunky],ins.adsbygoogle,[class*=popunder],[id*=popunder]\";" +
+    "function kill(el){try{el.style.setProperty(\"display\",\"none\",\"important\");el.remove();}catch(e){}}" +
+    "function sweep(root){try{var list=(root||document).querySelectorAll(SEL);for(var i=0;i<list.length;i++)kill(list[i]);}catch(e){}}" +
+    "function start(){sweep(document);try{new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){var an=ms[i].addedNodes;for(var j=0;j<an.length;j++){var n=an[j];if(n.nodeType===1){if(n.matches&&n.matches(SEL))kill(n);else sweep(n);}}}}).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}" +
+    "if(document.readyState===\"loading\")document.addEventListener(\"DOMContentLoaded\",start);else start();" +
+    "}catch(e){}})();</script>"
+
+/**
  * HTTPS path-filter engine (v0.8.0).
  *
  * For MITM-listed domains, DNS answers the domain's MITM IP and the
@@ -584,7 +619,8 @@ class MitmSession(
         }
         if (cleanable && !isXml) {
             MitmDebug.log("Content filter: cleaning ad config for ${target.take(80)}")
-            filterHtmlResponse(inp, sendToClient, headerStr, temp, foundEnd, totalHeader)
+            filterHtmlResponse(inp, sendToClient, headerStr, temp, foundEnd, totalHeader,
+                ctLine.contains("text/html"))
             return
         }
         MitmDebug.log("VAST filter: buffering response for ${target.take(80)}")
@@ -689,7 +725,8 @@ class MitmSession(
         headerStr: String,
         temp: ByteArray,
         foundEnd: Int,
-        totalHeader: Int
+        totalHeader: Int,
+        isHtmlPage: Boolean = false
     ) {
         val chunked = headerStr.contains("transfer-encoding:", ignoreCase = true) &&
             headerStr.lowercase().contains("chunked")
@@ -747,11 +784,26 @@ class MitmSession(
             sendToClient(bodyBytes)
             return
         }
-        val (cleaned, adCount) = cleanAdConfig(html)
+        val (cleaned0, adCount) = cleanAdConfig(html)
         MitmDebug.log("Content filter: removed $adCount ad URLs (chunked=$chunked, body=${bodyBytes.size}b)")
+        // uBlock-style layer (v0.8.20): on real HTML pages, inject cosmetic
+        // CSS + scriptlets (popunder window.open decoy, dynamic DOM
+        // sweeper) so ads inserted by page JS after load are hidden too.
+        var cleaned = cleaned0
+        var injected = false
+        if (isHtmlPage) {
+            val withBundle = injectBundle(cleaned)
+            if (withBundle !== cleaned) { cleaned = withBundle; injected = true }
+            if (injected) MitmDebug.log("Injected cosmetic+scriptlet bundle")
+        }
         val cleanedBytes = cleaned.toByteArray(Charsets.UTF_8)
         var newHeaders = headerStr.replace(
             Regex("Transfer-Encoding: [^\r\n]*\r\n", RegexOption.IGNORE_CASE), "")
+        if (injected) {
+            // The page's own CSP would block the injected inline bundle.
+            newHeaders = newHeaders.replace(
+                Regex("Content-Security-Policy[^:]*: [^\r\n]*\r\n", RegexOption.IGNORE_CASE), "")
+        }
         newHeaders = if (newHeaders.contains("content-length:", ignoreCase = true)) {
             newHeaders.replace(
                 Regex("Content-Length: \\d+", RegexOption.IGNORE_CASE),
@@ -761,6 +813,26 @@ class MitmSession(
         }
         sendToClient(newHeaders.toByteArray(Charsets.US_ASCII))
         sendToClient(cleanedBytes)
+    }
+
+    /**
+     * Inserts the cosmetic+scriptlet bundle right after <head> (or before
+     * <body>). Returns the input unchanged when there is no document
+     * structure (API fragments are not pages) or it is already injected.
+     */
+    private fun injectBundle(html: String): String {
+        if (html.contains("adshield-ubo")) return html
+        val lower = html.lowercase()
+        val headIdx = lower.indexOf("<head")
+        if (headIdx >= 0) {
+            val gt = html.indexOf('>', headIdx)
+            if (gt >= 0) return html.substring(0, gt + 1) + INJECT_BUNDLE +
+                html.substring(gt + 1)
+        }
+        val bodyIdx = lower.indexOf("<body")
+        if (bodyIdx >= 0) return html.substring(0, bodyIdx) + INJECT_BUNDLE +
+            html.substring(bodyIdx)
+        return html
     }
 
     /**
