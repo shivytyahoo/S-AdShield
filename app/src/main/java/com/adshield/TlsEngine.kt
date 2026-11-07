@@ -16,7 +16,11 @@ import javax.net.ssl.SSLEngineResult
  * scriptlet with a decoy window (popunders/popups get a fake 1px iframe
  * window instead of a real tab), and a MutationObserver DOM sweeper
  * (removes ad elements the page inserts dynamically, SPA-style).
- * Plain ES5, no template literals, fully self-defensive.
+ * v0.9.4: the click listener also kills the other tap-popup route —
+ * a cross-host anchor laid over the video (native navigation, so
+ * window.open never fires). Same-host links are untouched; only an
+ * anchor overlapping / wrapping a video, iframe or player container
+ * is stopped. Plain ES5, no template literals, fully self-defensive.
  */
 private val INJECT_BUNDLE: String =
     "<!-- adshield-ubo v1 --><style>" +
@@ -40,7 +44,7 @@ private val INJECT_BUNDLE: String =
     "if(window.__asNavUrl&&abs===window.__asNavUrl&&(Date.now()-window.__asNavT)<3000)return realOpen?realOpen.apply(window,arguments):null;" +
     "try{if(new URL(abs).hostname===location.hostname)return realOpen?realOpen.apply(window,arguments):null;}catch(e){}" +
     "return decoy(url);}catch(e){return decoy(url);}};" +
-    "document.addEventListener(\"click\",function(ev){try{var a=ev.target&&ev.target.closest?ev.target.closest(\"a[href]\"):null;window.__asNavUrl=a?a.href:\"\";window.__asNavT=Date.now();}catch(e){}},true);" +
+    "document.addEventListener(\"click\",function(ev){try{var a=ev.target&&ev.target.closest?ev.target.closest(\"a[href]\"):null;if(!a)return;window.__asNavUrl=a.href;window.__asNavT=Date.now();var abs=\"\";try{abs=new URL(a.href,location.href).href;}catch(e){return;}var host=\"\";try{host=new URL(abs).hostname;}catch(e){return;}if(!host||host===location.hostname)return;var over=false;try{var vs=document.querySelectorAll(\"video\");for(var i=0;i<vs.length;i++){var r=vs[i].getBoundingClientRect();var ar=a.getBoundingClientRect();if(ar.width>0&&r.width>0&&ar.left<r.right&&ar.right>r.left&&ar.top<r.bottom&&ar.bottom>r.top){over=true;break;}}}catch(e){}if(!over){try{if(a.querySelector(\"video,iframe\"))over=true;else if(a.closest(\"[class*=player],[id*=player],[class*=video],[id*=video]\"))over=true;else{var p=ev.target;while(p){if(p.tagName&&/^(VIDEO|IFRAME)$/.test(p.tagName)){over=true;break;}p=p.parentElement;}}}catch(e){}}if(over){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}}catch(e){}},true);" +
     "var SEL=\"iframe[src*=trafficstars],iframe[src*=syndicate],iframe[src*=exoclick],iframe[src*=doubleclick],iframe[src*=googlesyndication],iframe[src*=adsterra],iframe[src*=trafficjunky],ins.adsbygoogle,[class*=popunder],[id*=popunder]\";" +
     "function kill(el){try{el.style.setProperty(\"display\",\"none\",\"important\");el.remove();}catch(e){}}" +
     "function sweep(root){try{var list=(root||document).querySelectorAll(SEL);for(var i=0;i<list.length;i++)kill(list[i]);}catch(e){}}" +

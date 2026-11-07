@@ -13,12 +13,20 @@ package com.adshield
  * the carrier cuts the connection. Serving it through the MITM relay
  * takes the browser's fragile ECH path out of the loop.
  *
+ * v0.9.4: video file hosts added — tubes embed their players from
+ * these hosts (F4/StreamWish/FileMoon/Dood/Voe/Streamtape/VidHide),
+ * and the player document is where the tap-to-play popunder lives.
+ * Those hosts were plain FWD before, so the player page never got
+ * the in-page bundle and its window.open ran unopposed. MITM-ing
+ * them puts the bundle inside the player document itself. Video
+ * bytes (mp4/m3u8) are not HTML, so they pass through untouched.
+ *
  * Deliberately EXCLUDED: creator/payment platforms (OnlyFans, Fansly,
  * ManyVids, Clips4Sale) where interception could disturb purchases,
  * uploads or creator logins — the generic DNS shield still covers
  * their ad/tracker domains.
  */
-const val EMBEDDED_LIST_VERSION = 2
+const val EMBEDDED_LIST_VERSION = 3
 val EMBEDDED_MITM_DOMAINS: List<String> = listOf(
     // Mega tubes (Aylo network + independents)
     "pornhub.com", "pornhub.org", "redtube.com", "youporn.com", "tube8.com",
@@ -34,6 +42,12 @@ val EMBEDDED_MITM_DOMAINS: List<String> = listOf(
     "porn300.com", "veporn.com", "h2porn.com", "dinotube.com", "gotporn.com",
     "userporn.com", "porntube.com", "moviefap.com", "playvid.com",
     "sextb.net", "cdn001.imggle.net", "cdn002.imggle.net", "imggle.net",
+    // Video file hosts — players embedded by tubes (v0.9.4, tap-popunder fix)
+    "f4stream.com", "f4scdn.com", "f4s.top",
+    "streamwish.to", "streamwish.com",
+    "filemoon.sx", "filemoon.to",
+    "doodstream.com", "dood.watch",
+    "voe.sx", "streamtape.com", "vidhide.com",
     "camwhores.tv", "maturetube.com", "ashemaletube.com",
     "pornhost.com", "alohatube.com", "fantasti.cc", "efukt.com",
     "tubegalore.com", "xxxbunker.com", "perfectgirls.net", "imagefap.com",
