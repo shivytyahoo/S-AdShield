@@ -42,6 +42,7 @@ class MainActivity : Activity() {
     private lateinit var antiDetectButton: Button
     private lateinit var mitmButton: Button
     private lateinit var caButton: Button
+    private lateinit var removeCaButton: Button
     private lateinit var domainsButton: Button
     private lateinit var logButton: Button
     private lateinit var statusText: TextView
@@ -227,6 +228,18 @@ class MainActivity : Activity() {
         }
         hero.addView(caButton, LinearLayout.LayoutParams(-1, dp(42)))
         hero.addView(space(8))
+        removeCaButton = Button(this).apply {
+            text = "REMOVE CA CERTIFICATE (DNS-ONLY MODE)"
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            isAllCaps = false
+            setTextColor(color("#93A4BA"))
+            background = rounded("#16352F", 14)
+            setPadding(dp(12), 0, dp(12), 0)
+            setOnClickListener { showRemoveCaDialog() }
+        }
+        hero.addView(removeCaButton, LinearLayout.LayoutParams(-1, dp(42)))
+        hero.addView(space(8))
         domainsButton = Button(this).apply {
             text = "MITM DOMAINS"
             textSize = 11f
@@ -275,12 +288,15 @@ class MainActivity : Activity() {
         val engine = infoCard("PROTECTION ENGINE", "Local VPN DNS filter", "No remote VPN server • traffic stays on device")
         root.addView(engine)
         root.addView(space(10))
+        val caNote = infoCard("ABOUT THE 'NETWORK MAY BE MONITORED' WARNING", "Android shows this for any user-installed certificate", "The certificate is created on this device and only S-AdShield can use it. Nothing leaves your device. The warning goes away only if the certificate is removed — use REMOVE CA CERTIFICATE above for DNS-only mode.")
+        root.addView(caNote)
+        root.addView(space(10))
         val sources = infoCard("FILTER SOURCES", "250,000+ domains — EXTREME shield", "HaGeZi PRO • uBlock • StevenBlack • 7-network pack • Streaming SSAI pack (Prime / JioHotstar / Netflix)")
         root.addView(sources)
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  S-AdShield v0.9.5"
+            text = "Developed with love by Shiv  •  S-AdShield v0.9.6"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))
@@ -434,6 +450,7 @@ class MainActivity : Activity() {
         mitmButton.background = rounded("#16352F", 14)
         mitmButton.setPadding(dp(12), 0, dp(12), 0)
         caButton.visibility = if (on || !caDone) View.VISIBLE else View.GONE
+        removeCaButton.visibility = if (caDone) View.VISIBLE else View.GONE
         domainsButton.visibility = if (on) View.VISIBLE else View.GONE
         if (caDone) caButton.text = "CA INSTALLED ✓ (tap to reinstall)"
     }
@@ -500,7 +517,8 @@ class MainActivity : Activity() {
                 "2. Biometrics and security → Other security settings\n" +
                 "3. Install from device storage → CA certificate\n" +
                 "4. \"$fileName\" select karo → Install dabao\n\n" +
-                "Install hone ke baad HTTPS PATH FILTER on kar sakte ho.")
+                "Install hone ke baad HTTPS PATH FILTER on kar sakte ho.\n\n" +
+                "Note: Android will show a 'Network may be monitored' warning while this certificate is installed. That is Android's own warning for any user-installed certificate (AdGuard and every HTTPS filter show the same). The certificate is created on this device and only S-AdShield can use it.")
             .setPositiveButton("SETTINGS KHOLO") { _, _ ->
                 try {
                     startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
@@ -512,6 +530,61 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("BAAD ME", null)
             .show()
+    }
+
+    // ---------- Remove CA -> DNS-only mode (v0.9.6) ----------
+    // The "Network may be monitored" warning is posted by Android itself
+    // while a user CA is installed; no app can hide it. The only way to
+    // make it (and the strict apps that refuse to run with a user CA) go
+    // away is to remove the certificate. DNS blocking keeps working;
+    // HTTPS filtering, the video popup trap and the poster fix stop.
+    private fun showRemoveCaDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Remove CA certificate?")
+            .setMessage("Android shows 'Network may be monitored' while this certificate is installed — that warning is made by Android itself, and no app can hide it while the certificate stays.\n\n" +
+                "Removing it:\n" +
+                "• The warning goes away, and apps that refuse to run with a user certificate installed will work again.\n" +
+                "• DNS ad-blocking keeps working.\n" +
+                "• HTTPS filtering, the video popup trap and the poster fix stop working.\n\n" +
+                "Tap REMOVE to turn MITM off, then remove 'AdShield MITM CA' on the next screen (Trusted credentials → User tab).")
+            .setPositiveButton("REMOVE & OPEN SETTINGS") { _, _ ->
+                // Turn MITM off first AND clear the CA flag, so the filter
+                // can never be re-enabled without a fresh CA install
+                // (with no CA, MITM-listed sites would fail to load).
+                val prefs = getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
+                prefs.edit()
+                    .putBoolean(AdShieldVpnService.KEY_MITM_ENABLED, false)
+                    .putBoolean(AdShieldVpnService.KEY_MITM_CA_DONE, false)
+                    .apply()
+                updateMitmButton()
+                Toast.makeText(this,
+                    "MITM off — now remove 'AdShield MITM CA' in Settings",
+                    Toast.LENGTH_LONG).show()
+                openTrustedCredentials()
+            }
+            .setNegativeButton("CANCEL", null)
+            .show()
+    }
+
+    private fun openTrustedCredentials() {
+        // No public SDK constant for the User tab of Trusted credentials;
+        // the AOSP action string is tried first, Security settings is the
+        // fallback (the dialog text also gives the manual path).
+        val actions = listOf(
+            "android.settings.TRUSTED_CREDENTIALS_USER",
+            Settings.ACTION_SECURITY_SETTINGS
+        )
+        for (action in actions) {
+            try {
+                startActivity(Intent(action))
+                return
+            } catch (_: Exception) {
+            }
+        }
+        try {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
+        } catch (_: Exception) {
+        }
     }
 
     private fun showDomainEditor() {
