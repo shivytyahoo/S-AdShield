@@ -19,18 +19,22 @@ import javax.net.ssl.SSLEngineResult
  * v0.9.4: the click listener also kills the other tap-popup route —
  * a cross-host anchor laid over the video (native navigation, so
  * window.open never fires). Same-host links are untouched; only an
- * anchor overlapping / wrapping a video, iframe or player container
- * is stopped. Plain ES5, no template literals, fully self-defensive.
+ * anchor overlapping / wrapping a video or iframe is stopped.
+ * v0.9.5: player documents get INJECT_BUNDLE_PLAYER (same script,
+ * no cosmetic CSS) — the player's anti-adblock bait trips on the CSS.
+ * Plain ES5, no template literals, fully self-defensive.
  */
-private val INJECT_BUNDLE: String =
-    "<!-- adshield-ubo v1 --><style>" +
+private val INJECT_CSS: String =
+    "<style>" +
     ".adsbygoogle,ins.adsbygoogle,div[id^=\"div-gpt-ad\"],iframe[id^=\"google_ads\"]," +
     "iframe[src*=\"doubleclick\"],iframe[src*=\"googlesyndication\"]," +
     "iframe[src*=\"trafficstars\"],iframe[src*=\"syndicate\"],iframe[src*=\"exoclick\"]," +
     "iframe[src*=\"adsterra\"],iframe[src*=\"trafficjunky\"]," +
     "[class*=\"popunder\"],[id*=\"popunder\"]," +
     ".ad-banner,.ads-banner,.banner-ad" +
-    "{display:none!important;visibility:hidden!important}</style>" +
+    "{display:none!important;visibility:hidden!important}</style>"
+private val INJECT_BUNDLE: String =
+    "<!-- adshield-ubo v1 -->" + INJECT_CSS +
     "<script>(function(){\"use strict\";try{" +
     "var M=[\"syndicate\",\"trafficstars\",\"trafficjunky\",\"exoclick\",\"adsterra\",\"doubleclick\",\"googlesyndication\",\"/v1/direct/\",\"popunder\",\"adserver\",\"adsbygoogle\"];" +
     "function isAd(u){if(!u)return false;u=(\"\"+u).toLowerCase();for(var i=0;i<M.length;i++){if(u.indexOf(M[i])>=0)return true;}return false;}" +
@@ -44,13 +48,22 @@ private val INJECT_BUNDLE: String =
     "if(window.__asNavUrl&&abs===window.__asNavUrl&&(Date.now()-window.__asNavT)<3000)return realOpen?realOpen.apply(window,arguments):null;" +
     "try{if(new URL(abs).hostname===location.hostname)return realOpen?realOpen.apply(window,arguments):null;}catch(e){}" +
     "return decoy(url);}catch(e){return decoy(url);}};" +
-    "document.addEventListener(\"click\",function(ev){try{var a=ev.target&&ev.target.closest?ev.target.closest(\"a[href]\"):null;if(!a)return;window.__asNavUrl=a.href;window.__asNavT=Date.now();var abs=\"\";try{abs=new URL(a.href,location.href).href;}catch(e){return;}var host=\"\";try{host=new URL(abs).hostname;}catch(e){return;}if(!host||host===location.hostname)return;var over=false;try{var vs=document.querySelectorAll(\"video\");for(var i=0;i<vs.length;i++){var r=vs[i].getBoundingClientRect();var ar=a.getBoundingClientRect();if(ar.width>0&&r.width>0&&ar.left<r.right&&ar.right>r.left&&ar.top<r.bottom&&ar.bottom>r.top){over=true;break;}}}catch(e){}if(!over){try{if(a.querySelector(\"video,iframe\"))over=true;else if(a.closest(\"[class*=player],[id*=player],[class*=video],[id*=video]\"))over=true;else{var p=ev.target;while(p){if(p.tagName&&/^(VIDEO|IFRAME)$/.test(p.tagName)){over=true;break;}p=p.parentElement;}}}catch(e){}}if(over){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}}catch(e){}},true);" +
+    "document.addEventListener(\"click\",function(ev){try{var a=ev.target&&ev.target.closest?ev.target.closest(\"a[href]\"):null;if(!a)return;window.__asNavUrl=a.href;window.__asNavT=Date.now();var abs=\"\";try{abs=new URL(a.href,location.href).href;}catch(e){return;}var host=\"\";try{host=new URL(abs).hostname;}catch(e){return;}if(!host||host===location.hostname)return;var over=false;try{var vs=document.querySelectorAll(\"video\");for(var i=0;i<vs.length;i++){var r=vs[i].getBoundingClientRect();var ar=a.getBoundingClientRect();if(ar.width>0&&r.width>0&&ar.left<r.right&&ar.right>r.left&&ar.top<r.bottom&&ar.bottom>r.top){over=true;break;}}}catch(e){}if(!over){try{if(a.querySelector(\"video,iframe\"))over=true;else{var p=ev.target;while(p){if(p.tagName&&/^(VIDEO|IFRAME)$/.test(p.tagName)){over=true;break;}p=p.parentElement;}}}catch(e){}}if(over){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}}catch(e){}},true);" +
     "var SEL=\"iframe[src*=trafficstars],iframe[src*=syndicate],iframe[src*=exoclick],iframe[src*=doubleclick],iframe[src*=googlesyndication],iframe[src*=adsterra],iframe[src*=trafficjunky],ins.adsbygoogle,[class*=popunder],[id*=popunder]\";" +
     "function kill(el){try{el.style.setProperty(\"display\",\"none\",\"important\");el.remove();}catch(e){}}" +
     "function sweep(root){try{var list=(root||document).querySelectorAll(SEL);for(var i=0;i<list.length;i++)kill(list[i]);}catch(e){}}" +
     "function start(){sweep(document);try{new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){var an=ms[i].addedNodes;for(var j=0;j<an.length;j++){var n=an[j];if(n.nodeType===1){if(n.matches&&n.matches(SEL))kill(n);else sweep(n);}}}}).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}" +
     "if(document.readyState===\"loading\")document.addEventListener(\"DOMContentLoaded\",start);else start();" +
     "}catch(e){}})();</script>"
+
+// v0.9.5 — player-safe bundle: the same traps (window.open decoy,
+// anchor-overlay trap, DOM sweeper) but NO cosmetic CSS. Video players
+// run their own anti-adblock bait (a div with class ad-banner) and the
+// CSS hides it, so the player refuses to start at all. Player documents
+// get this variant instead (see isPlayerHost).
+private val INJECT_BUNDLE_PLAYER: String =
+    "<!-- adshield-ubo v1 -->" +
+    INJECT_BUNDLE.substring(INJECT_BUNDLE.indexOf("<script>"))
 
 /**
  * HTTPS path-filter engine (v0.8.0).
@@ -1272,15 +1285,19 @@ class MitmSession(
      */
     private fun injectBundle(html: String): String {
         if (html.contains("adshield-ubo")) return html
+        // Player documents get the player-safe bundle (v0.9.5): same
+        // traps, no cosmetic CSS, or the player's anti-adblock bait
+        // trips and playback never starts.
+        val bundle = if (isPlayerHost(host)) INJECT_BUNDLE_PLAYER else INJECT_BUNDLE
         val lower = html.lowercase()
         val headIdx = lower.indexOf("<head")
         if (headIdx >= 0) {
             val gt = html.indexOf('>', headIdx)
-            if (gt >= 0) return html.substring(0, gt + 1) + INJECT_BUNDLE +
+            if (gt >= 0) return html.substring(0, gt + 1) + bundle +
                 html.substring(gt + 1)
         }
         val bodyIdx = lower.indexOf("<body")
-        if (bodyIdx >= 0) return html.substring(0, bodyIdx) + INJECT_BUNDLE +
+        if (bodyIdx >= 0) return html.substring(0, bodyIdx) + bundle +
             html.substring(bodyIdx)
         return html
     }
@@ -1361,11 +1378,18 @@ class MitmSession(
         // desyncs on short/escaped strings in real pages, which silently
         // exempted whole ad configs. A URL run is scheme + "//" (plain or
         // \/-escaped, or protocol-relative) up to the next delimiter.
+        // v0.9.5: '&' also ends a run. HTML-escaped JSON attributes
+        // (data-ads="...&quot;...&amp;...") have no real quotes, so a run
+        // starting at one ad URL swallowed the whole attribute up to its
+        // closing quote — the player's data-ads JSON broke, its init
+        // threw, and playback never started (v0.9.4 regression: spinner
+        // forever, no /api/play call). With '&' as a delimiter each URL
+        // is blanked on its own and the JSON stays valid.
         val adUrlMarkers = listOf("/_xa/", "vast", "preroll", "trafficjunky",
             "trafficstars", "syndicate", "popunder", "/v1/direct/", ".spot.js",
             "exoclick", "adsterra", "doubleclick",
             "googlesyndication", "adservice.", "adserver")
-        val urlRun = Regex("""(?:https?:)?(?:[\\/]{2})[^\s"'`<>()]+""")
+        val urlRun = Regex("""(?:https?:)?(?:[\\/]{2})[^\s"'`<>()&]+""")
         cleaned = urlRun.replace(cleaned) { m ->
             val norm = m.value.replace("\\/", "/").lowercase()
             val onRotating = rotatingHosts.any {

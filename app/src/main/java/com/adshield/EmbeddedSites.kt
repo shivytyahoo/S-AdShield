@@ -27,6 +27,25 @@ package com.adshield
  * their ad/tracker domains.
  */
 const val EMBEDDED_LIST_VERSION = 3
+
+/**
+ * Video file hosts (v0.9.4 list) — their player documents get the
+ * player-safe bundle (v0.9.5): same traps, no cosmetic CSS, because
+ * the players run an anti-adblock bait div (class ad-banner) that the
+ * CSS would hide, and then they refuse to start at all.
+ */
+val PLAYER_HOSTS: Set<String> = setOf(
+    "f4stream.com", "f4scdn.com", "f4s.top",
+    "streamwish.to", "streamwish.com",
+    "filemoon.sx", "filemoon.to",
+    "doodstream.com", "dood.watch",
+    "voe.sx", "streamtape.com", "vidhide.com"
+)
+
+fun isPlayerHost(host: String): Boolean {
+    val h = host.lowercase()
+    return PLAYER_HOSTS.any { h == it || h.endsWith(".$it") }
+}
 val EMBEDDED_MITM_DOMAINS: List<String> = listOf(
     // Mega tubes (Aylo network + independents)
     "pornhub.com", "pornhub.org", "redtube.com", "youporn.com", "tube8.com",
