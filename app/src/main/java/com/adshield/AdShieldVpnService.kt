@@ -809,6 +809,7 @@ class AdShieldVpnService : VpnService() {
         const val KEY_MITM_DOMAINS = "mitm_domains"
         const val KEY_MITM_RULES = "mitm_rules"
         const val KEY_MITM_CA_DONE = "mitm_ca_done"
+        const val KEY_ADSKIP_ENABLED = "adskip_enabled"
         const val KEY_EMBEDDED_MERGED = "embedded_v090_merged"
         const val KEY_EMBEDDED_VER = "embedded_list_ver"
         const val DEFAULT_MITM_DOMAINS = "pornhub.org,pornhub.com"

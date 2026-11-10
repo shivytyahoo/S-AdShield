@@ -27,7 +27,9 @@ import android.widget.TextView
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.AlertDialog
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.security.KeyChain
+import android.view.accessibility.AccessibilityManager
 import android.widget.EditText
 import android.widget.Toast
 
@@ -40,6 +42,7 @@ class MainActivity : Activity() {
     private lateinit var batteryButton: Button
     private lateinit var streamingButton: Button
     private lateinit var antiDetectButton: Button
+    private lateinit var adskipButton: Button
     private lateinit var mitmButton: Button
     private lateinit var caButton: Button
     private lateinit var removeCaButton: Button
@@ -206,6 +209,16 @@ class MainActivity : Activity() {
         }
         hero.addView(antiDetectButton, LinearLayout.LayoutParams(-1, dp(42)))
         hero.addView(space(8))
+        adskipButton = Button(this).apply {
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            isAllCaps = false
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setOnClickListener { toggleAdskip() }
+        }
+        hero.addView(adskipButton, LinearLayout.LayoutParams(-1, dp(42)))
+        hero.addView(space(8))
         mitmButton = Button(this).apply {
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
@@ -264,6 +277,7 @@ class MainActivity : Activity() {
         }
         hero.addView(logButton, LinearLayout.LayoutParams(-1, dp(42)))
         updateMitmButton()
+        updateAdskipButton()
         root.addView(hero)
         protectionCard = hero
 
@@ -296,7 +310,7 @@ class MainActivity : Activity() {
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  S-AdShield v0.9.6"
+            text = "Developed with love by Shiv  •  S-AdShield v0.9.7"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))
@@ -453,6 +467,78 @@ class MainActivity : Activity() {
         removeCaButton.visibility = if (caDone) View.VISIBLE else View.GONE
         domainsButton.visibility = if (on) View.VISIBLE else View.GONE
         if (caDone) caButton.text = "CA INSTALLED ✓ (tap to reinstall)"
+    }
+
+    // ---------- GKD-style Auto-Skip (v0.9.7) ----------
+    // Auto-taps "Skip Ad" / "Close" buttons in any app via an
+    // AccessibilityService. Needs two switches: this in-app toggle AND the
+    // service enabled in Android's Accessibility settings.
+
+    private fun toggleAdskip() {
+        val prefs = getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
+        val next = !prefs.getBoolean(AdShieldVpnService.KEY_ADSKIP_ENABLED, false)
+        prefs.edit().putBoolean(AdShieldVpnService.KEY_ADSKIP_ENABLED, next).apply()
+        updateAdskipButton()
+        if (next) {
+            if (isAdskipServiceEnabled()) {
+                Toast.makeText(this, "Auto-Skip ON — ads will skip themselves",
+                    Toast.LENGTH_LONG).show()
+            } else {
+                showAdskipGuide()
+            }
+        }
+    }
+
+    private fun updateAdskipButton() {
+        if (!::adskipButton.isInitialized) return
+        val prefs = getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
+        val on = prefs.getBoolean(AdShieldVpnService.KEY_ADSKIP_ENABLED, false)
+        if (!on) {
+            adskipButton.text = "AUTO-SKIP ADS: OFF"
+            adskipButton.setTextColor(color("#93A4BA"))
+        } else if (isAdskipServiceEnabled()) {
+            adskipButton.text = "AUTO-SKIP ADS: ON"
+            adskipButton.setTextColor(color("#59E1B8"))
+        } else {
+            adskipButton.text = "AUTO-SKIP ADS: SETUP NEEDED (tap)"
+            adskipButton.setTextColor(color("#FFB84D"))
+        }
+        adskipButton.background = rounded("#16352F", 14)
+        adskipButton.setPadding(dp(12), 0, dp(12), 0)
+    }
+
+    private fun isAdskipServiceEnabled(): Boolean {
+        val am = getSystemService(ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val enabled = am.getEnabledAccessibilityServiceList(
+            AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        return enabled.any { it.id.startsWith("$packageName/") }
+    }
+
+    private fun showAdskipGuide() {
+        AlertDialog.Builder(this)
+            .setTitle("One more step to turn Auto-Skip on")
+            .setMessage("Android needs you to allow it once:\n\n" +
+                "1. Tap OPEN SETTINGS below\n" +
+                "2. Accessibility → Downloaded apps → S-AdShield Auto-Skip\n" +
+                "3. Turn it ON and confirm\n\n" +
+                "It only taps Skip / Close buttons in other apps — nothing else, " +
+                "and it never runs inside S-AdShield or Settings. Turn AUTO-SKIP ADS off " +
+                "anytime to stop it.")
+            .setPositiveButton("OPEN SETTINGS") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                } catch (_: Exception) {
+                    try {
+                        startActivity(Intent(Settings.ACTION_SETTINGS))
+                    } catch (_: Exception) {}
+                }
+            }
+            .setNegativeButton("NOT NOW") { _, _ ->
+                getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
+                    .edit().putBoolean(AdShieldVpnService.KEY_ADSKIP_ENABLED, false).apply()
+                updateAdskipButton()
+            }
+            .show()
     }
 
     private fun installCaCert() {
@@ -695,7 +781,11 @@ class MainActivity : Activity() {
     private fun space(h: Int): View = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(h)) }
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-    override fun onResume() { super.onResume(); handler.post(refresh) }
+    override fun onResume() {
+        super.onResume()
+        handler.post(refresh)
+        updateAdskipButton() // refresh SETUP NEEDED -> ON after the user returns from Accessibility settings
+    }
     override fun onPause() { handler.removeCallbacks(refresh); pulse?.cancel(); super.onPause() }
 
     @Suppress("DEPRECATION")
