@@ -310,7 +310,7 @@ class MainActivity : Activity() {
         root.addView(space(18))
 
         val footer = TextView(this).apply {
-            text = "Developed with love by Shiv  •  S-AdShield v0.9.7"
+            text = "Developed with love by Shiv  •  S-AdShield v0.9.8"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(color("#60738B"))
@@ -476,7 +476,13 @@ class MainActivity : Activity() {
 
     private fun toggleAdskip() {
         val prefs = getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
-        val next = !prefs.getBoolean(AdShieldVpnService.KEY_ADSKIP_ENABLED, false)
+        val on = prefs.getBoolean(AdShieldVpnService.KEY_ADSKIP_ENABLED, false)
+        if (on && !isAdskipServiceEnabled()) {
+            // Setup never finished — tapping retries the guide instead of switching off.
+            showAdskipGuide()
+            return
+        }
+        val next = !on
         prefs.edit().putBoolean(AdShieldVpnService.KEY_ADSKIP_ENABLED, next).apply()
         updateAdskipButton()
         if (next) {
@@ -515,30 +521,55 @@ class MainActivity : Activity() {
     }
 
     private fun showAdskipGuide() {
+        // Android 13+ blocks sideloaded apps (APK installs, not Play Store)
+        // from enabling an AccessibilityService until the user allows
+        // "restricted settings" for the app — otherwise the switch shows
+        // "App was denied access". That step must come first.
         AlertDialog.Builder(this)
-            .setTitle("One more step to turn Auto-Skip on")
-            .setMessage("Android needs you to allow it once:\n\n" +
-                "1. Tap OPEN SETTINGS below\n" +
-                "2. Accessibility → Downloaded apps → S-AdShield Auto-Skip\n" +
-                "3. Turn it ON and confirm\n\n" +
+            .setTitle("Two steps to turn Auto-Skip on")
+            .setMessage("Android needs you to allow it once. Because S-AdShield was " +
+                "installed from an APK (not the Play Store), Android blocks the " +
+                "switch until you allow restricted settings:\n\n" +
+                "STEP 1 — Allow restricted settings:\n" +
+                "Tap OPEN APP INFO below → tap the ⋮ menu (top-right) → " +
+                "\"Allow restricted settings\" → Allow.\n\n" +
+                "STEP 2 — Turn the service on:\n" +
+                "Tap ACCESSIBILITY below → Downloaded apps → " +
+                "S-AdShield Auto-Skip → turn it ON and confirm.\n\n" +
                 "It only taps Skip / Close buttons in other apps — nothing else, " +
                 "and it never runs inside S-AdShield or Settings. Turn AUTO-SKIP ADS off " +
                 "anytime to stop it.")
-            .setPositiveButton("OPEN SETTINGS") { _, _ ->
-                try {
-                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                } catch (_: Exception) {
-                    try {
-                        startActivity(Intent(Settings.ACTION_SETTINGS))
-                    } catch (_: Exception) {}
-                }
-            }
+            .setPositiveButton("OPEN APP INFO") { _, _ -> openAppInfo() }
+            .setNeutralButton("ACCESSIBILITY") { _, _ -> openAccessibilitySettings() }
             .setNegativeButton("NOT NOW") { _, _ ->
                 getSharedPreferences(AdShieldVpnService.PREFS, MODE_PRIVATE)
                     .edit().putBoolean(AdShieldVpnService.KEY_ADSKIP_ENABLED, false).apply()
                 updateAdskipButton()
             }
             .show()
+    }
+
+    private fun openAppInfo() {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_SETTINGS))
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun openAccessibilitySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_SETTINGS))
+            } catch (_: Exception) {}
+        }
     }
 
     private fun installCaCert() {
