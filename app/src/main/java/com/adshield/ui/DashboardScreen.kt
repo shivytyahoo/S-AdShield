@@ -23,7 +23,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -57,16 +56,15 @@ fun DashboardScreen(
     onToggleProtection: () -> Unit,
     onToggleStreaming: () -> Unit,
     onToggleAntiDetect: () -> Unit,
-    onOpenBatterySettings: () -> Unit
+    onOpenBatterySettings: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Scaffold { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 22.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 22.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
             Spacer(Modifier.height(18.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -233,7 +231,6 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(28.dp))
-        }
     }
 }
 

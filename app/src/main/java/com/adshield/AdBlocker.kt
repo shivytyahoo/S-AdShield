@@ -98,43 +98,66 @@ object AdBlocker {
         if (fullListLoaded) return
         synchronized(this) {
             if (fullListLoaded) return
+            val prefs = try {
+                context.getSharedPreferences(AdShieldVpnService.PREFS, Context.MODE_PRIVATE)
+            } catch (_: Exception) {
+                null
+            }
             try {
-                streamingEnabled = context
-                    .getSharedPreferences(AdShieldVpnService.PREFS, Context.MODE_PRIVATE)
-                    .getBoolean(KEY_STREAMING_EXTREME, true)
+                streamingEnabled = prefs?.getBoolean(KEY_STREAMING_EXTREME, true) ?: true
             } catch (_: Exception) {}
+            if (prefs != null) loadUserRules(prefs)
             val lines = ArrayList<String>()
             for (name in listOf(
                 "blocklist.txt", "network_blocklist.txt", "ad_networks.txt",
                 "ublock_domains.txt", "hagezi_domains.txt", "streaming_safe_rules.txt"
             )) {
                 try {
-                    lines += context.assets.open(name)
-                        .bufferedReader(Charsets.US_ASCII)
-                        .readLines()
+                    lines += openListLines(context, name)
                 } catch (_: Exception) {
-                    // Optional asset: keep whatever else loaded.
+                    // Optional list: keep whatever else loaded.
                 }
             }
             if (lines.isNotEmpty()) loadDomains(lines)
             try {
-                loadAllowlist(
-                    context.assets.open("allowlist.txt")
-                        .bufferedReader(Charsets.US_ASCII)
-                        .readLines()
-                )
+                loadAllowlist(openListLines(context, "allowlist.txt"))
             } catch (_: Exception) {
                 // Optional asset: no allowlist.
             }
             try {
-                loadStreamingDomains(
-                    context.assets.open("streaming_blocklist.txt")
-                        .bufferedReader(Charsets.US_ASCII)
-                        .readLines()
-                )
+                loadStreamingDomains(openListLines(context, "streaming_blocklist.txt"))
             } catch (_: Exception) {
                 // Streaming pack optional; main lists still protect.
             }
+        }
+    }
+
+    /**
+     * Reads a list by name, preferring a downloaded update in
+     * filesDir/lists/ (see [ListUpdater]) over the bundled asset.
+     */
+    private fun openListLines(context: Context, name: String): List<String> {
+        val downloaded = java.io.File(context.filesDir, "lists/$name")
+        if (downloaded.isFile && downloaded.length() > 0) {
+            return downloaded.bufferedReader(Charsets.UTF_8).readLines()
+        }
+        return context.assets.open(name)
+            .bufferedReader(Charsets.US_ASCII)
+            .readLines()
+    }
+
+    /** Reloads all lists (e.g. after a list update) on a background thread. */
+    fun reloadAsync(context: Context) {
+        val appContext = context.applicationContext
+        Thread {
+            try {
+                synchronized(this) { fullListLoaded = false }
+                init(appContext)
+            } catch (_: Exception) {}
+        }.apply {
+            isDaemon = true
+            name = "adshield-list-reloader"
+            start()
         }
     }
 
@@ -184,16 +207,81 @@ object AdBlocker {
         allowed = parseDomainSet(lines)
     }
 
+    /** Parses plain domains and hosts-style lines into a domain set. */
+    fun parseDomains(lines: Iterable<String>): Set<String> = parseDomainSet(lines)
+
     private fun parseDomainSet(lines: Iterable<String>): HashSet<String> {
         val parsed = HashSet<String>()
         for (raw in lines) {
-            val d = raw.trim().lowercase(Locale.US).trim('.')
-            if (d.startsWith("#")) continue
-            if (d.isNotEmpty() && d.contains('.') && !d.contains(' ') && !d.contains('/')) {
-                parsed.add(d)
+            var d = raw.trim().lowercase(Locale.US).trim('.')
+            if (d.startsWith("#") || d.startsWith("!")) continue
+            if (d.isEmpty()) continue
+            // Hosts format: "0.0.0.0 example.com" -> "example.com".
+            if (d.contains(' ')) {
+                val parts = d.split(Regex("\\s+"))
+                if (parts.size >= 2 &&
+                    (parts[0] == "0.0.0.0" || parts[0] == "127.0.0.1")
+                ) {
+                    d = parts[1]
+                } else {
+                    continue
+                }
             }
+            // A few bundled lines joined the prefix with a dot
+            // ("0.0.0.0.example.com"); strip it so the entry is live.
+            if (d.startsWith("0.0.0.0.")) d = d.removePrefix("0.0.0.0.")
+            if (d.contains('.') && !d.contains('/')) parsed.add(d)
         }
         return parsed
+    }
+
+    // ---- User rules (v1.1.0, from the Request Log) ----
+    // A user rule beats every built-in list: a user-allowed domain always
+    // resolves, a user-blocked domain never does.
+
+    @Volatile
+    private var userBlocked: Set<String> = emptySet()
+
+    @Volatile
+    private var userAllowed: Set<String> = emptySet()
+
+    const val KEY_USER_BLOCKED = "user_blocked_domains"
+    const val KEY_USER_ALLOWED = "user_allowed_domains"
+
+    fun loadUserRules(prefs: android.content.SharedPreferences) {
+        userBlocked = prefs.getStringSet(KEY_USER_BLOCKED, emptySet()) ?: emptySet()
+        userAllowed = prefs.getStringSet(KEY_USER_ALLOWED, emptySet()) ?: emptySet()
+    }
+
+    /** 1 = user-allowed, -1 = user-blocked, 0 = no user rule. */
+    fun userRuleFor(host: String): Int {
+        val h = host.trim().trim('.').lowercase(Locale.US)
+        if (matches(userAllowed, h)) return 1
+        if (matches(userBlocked, h)) return -1
+        return 0
+    }
+
+    /** Sets a user rule for [host] (0 clears it) and persists it. */
+    fun setUserRule(context: Context, host: String, rule: Int) {
+        val h = host.trim().trim('.').lowercase(Locale.US)
+        if (h.isEmpty() || !h.contains('.')) return
+        val prefs = context.getSharedPreferences(
+            AdShieldVpnService.PREFS, Context.MODE_PRIVATE
+        )
+        val blocked = userBlocked.toMutableSet()
+        val allowed = userAllowed.toMutableSet()
+        blocked.remove(h)
+        allowed.remove(h)
+        when (rule) {
+            -1 -> blocked.add(h)
+            1 -> allowed.add(h)
+        }
+        userBlocked = blocked
+        userAllowed = allowed
+        prefs.edit()
+            .putStringSet(KEY_USER_BLOCKED, blocked)
+            .putStringSet(KEY_USER_ALLOWED, allowed)
+            .apply()
     }
 
     /**
@@ -203,6 +291,9 @@ object AdBlocker {
      */
     fun isBlocked(host: String): Boolean {
         val h = host.trim().trim('.').lowercase(Locale.US)
+        // User rules (from the Request Log) beat every built-in list.
+        if (matches(userAllowed, h)) return false
+        if (matches(userBlocked, h)) return true
         if (matches(allowed, h)) return false
         if (matches(blocked, h)) return true
         if (streamingEnabled && matches(streamingBlocked, h)) return true

@@ -16,8 +16,8 @@ android {
         // Compose 1.13 / material3 1.5 require minSdk 24 (was 23).
         minSdk = 24
         targetSdk = 36
-        versionCode = 51
-        versionName = "1.0.0"
+        versionCode = 52
+        versionName = "1.1.0"
     }
 
     signingConfigs {
@@ -77,5 +77,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
 }
