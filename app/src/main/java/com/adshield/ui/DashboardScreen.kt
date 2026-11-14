@@ -46,8 +46,7 @@ data class DashboardState(
     val blockRate: Int = 0,
     val streamingOn: Boolean = true,
     val antiDetectOn: Boolean = true,
-    val batteryExempt: Boolean = false,
-    val showMigrationNote: Boolean = false
+    val batteryExempt: Boolean = false
 )
 
 @Composable
@@ -144,15 +143,19 @@ fun DashboardScreen(
                     OutlinedButton(
                         onClick = onOpenBatterySettings,
                         enabled = !state.batteryExempt,
-                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
                         Text(
                             text = stringResource(
                                 if (state.batteryExempt) R.string.battery_ready
                                 else R.string.battery_action
                             ),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
+                            // labelLarge (14sp) wrapped the long battery text
+                            // onto a second line and the 42dp button clipped
+                            // it. Short text + labelMedium fits on one line.
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
                         )
                     }
                 }
@@ -201,27 +204,6 @@ fun DashboardScreen(
                 checked = state.antiDetectOn,
                 onCheckedChange = { onToggleAntiDetect() }
             )
-            Spacer(Modifier.height(14.dp))
-
-            InfoCard(
-                title = stringResource(R.string.engine_title),
-                headline = stringResource(R.string.engine_headline),
-                detail = stringResource(R.string.engine_detail)
-            )
-            Spacer(Modifier.height(10.dp))
-            InfoCard(
-                title = stringResource(R.string.sources_title),
-                headline = stringResource(R.string.sources_headline),
-                detail = stringResource(R.string.sources_detail)
-            )
-            if (state.showMigrationNote) {
-                Spacer(Modifier.height(10.dp))
-                InfoCard(
-                    title = stringResource(R.string.migration_title),
-                    headline = stringResource(R.string.migration_headline),
-                    detail = stringResource(R.string.migration_text)
-                )
-            }
             Spacer(Modifier.height(18.dp))
             Text(
                 text = stringResource(R.string.footer),
@@ -314,37 +296,6 @@ private fun ToggleCard(
                 )
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange)
-        }
-    }
-}
-
-@Composable
-private fun InfoCard(title: String, headline: String, detail: String) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(16.dp, 14.dp, 16.dp, 14.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.height(5.dp))
-            Text(
-                text = headline,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }

@@ -101,7 +101,7 @@ object ListUpdater {
             val conn = URL(url).openConnection() as HttpURLConnection
             conn.connectTimeout = 15000
             conn.readTimeout = 60000
-            conn.setRequestProperty("User-Agent", "S-AdShield/1.1.0")
+            conn.setRequestProperty("User-Agent", "S-AdShield/1.2.0")
             if (conn.responseCode != HttpURLConnection.HTTP_OK) return null
             val lines = conn.inputStream.bufferedReader(Charsets.UTF_8).readLines()
             AdBlocker.parseDomains(lines)

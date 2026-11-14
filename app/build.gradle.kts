@@ -16,8 +16,8 @@ android {
         // Compose 1.13 / material3 1.5 require minSdk 24 (was 23).
         minSdk = 24
         targetSdk = 36
-        versionCode = 52
-        versionName = "1.1.0"
+        versionCode = 53
+        versionName = "1.2.0"
     }
 
     signingConfigs {

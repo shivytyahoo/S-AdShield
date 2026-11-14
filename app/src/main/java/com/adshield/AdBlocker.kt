@@ -106,7 +106,6 @@ object AdBlocker {
             try {
                 streamingEnabled = prefs?.getBoolean(KEY_STREAMING_EXTREME, true) ?: true
             } catch (_: Exception) {}
-            if (prefs != null) loadUserRules(prefs)
             val lines = ArrayList<String>()
             for (name in listOf(
                 "blocklist.txt", "network_blocklist.txt", "ad_networks.txt",
@@ -235,55 +234,6 @@ object AdBlocker {
         return parsed
     }
 
-    // ---- User rules (v1.1.0, from the Request Log) ----
-    // A user rule beats every built-in list: a user-allowed domain always
-    // resolves, a user-blocked domain never does.
-
-    @Volatile
-    private var userBlocked: Set<String> = emptySet()
-
-    @Volatile
-    private var userAllowed: Set<String> = emptySet()
-
-    const val KEY_USER_BLOCKED = "user_blocked_domains"
-    const val KEY_USER_ALLOWED = "user_allowed_domains"
-
-    fun loadUserRules(prefs: android.content.SharedPreferences) {
-        userBlocked = prefs.getStringSet(KEY_USER_BLOCKED, emptySet()) ?: emptySet()
-        userAllowed = prefs.getStringSet(KEY_USER_ALLOWED, emptySet()) ?: emptySet()
-    }
-
-    /** 1 = user-allowed, -1 = user-blocked, 0 = no user rule. */
-    fun userRuleFor(host: String): Int {
-        val h = host.trim().trim('.').lowercase(Locale.US)
-        if (matches(userAllowed, h)) return 1
-        if (matches(userBlocked, h)) return -1
-        return 0
-    }
-
-    /** Sets a user rule for [host] (0 clears it) and persists it. */
-    fun setUserRule(context: Context, host: String, rule: Int) {
-        val h = host.trim().trim('.').lowercase(Locale.US)
-        if (h.isEmpty() || !h.contains('.')) return
-        val prefs = context.getSharedPreferences(
-            AdShieldVpnService.PREFS, Context.MODE_PRIVATE
-        )
-        val blocked = userBlocked.toMutableSet()
-        val allowed = userAllowed.toMutableSet()
-        blocked.remove(h)
-        allowed.remove(h)
-        when (rule) {
-            -1 -> blocked.add(h)
-            1 -> allowed.add(h)
-        }
-        userBlocked = blocked
-        userAllowed = allowed
-        prefs.edit()
-            .putStringSet(KEY_USER_BLOCKED, blocked)
-            .putStringSet(KEY_USER_ALLOWED, allowed)
-            .apply()
-    }
-
     /**
      * Suffix-walk matcher: checks the host itself, then each parent domain.
      * `ads.doubleclick.net` matches an entry for `doubleclick.net`, while an
@@ -291,9 +241,6 @@ object AdBlocker {
      */
     fun isBlocked(host: String): Boolean {
         val h = host.trim().trim('.').lowercase(Locale.US)
-        // User rules (from the Request Log) beat every built-in list.
-        if (matches(userAllowed, h)) return false
-        if (matches(userBlocked, h)) return true
         if (matches(allowed, h)) return false
         if (matches(blocked, h)) return true
         if (streamingEnabled && matches(streamingBlocked, h)) return true

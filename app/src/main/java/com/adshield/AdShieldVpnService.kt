@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.net.ConnectivityManager
 import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
@@ -221,15 +220,6 @@ class AdShieldVpnService : VpnService() {
                 builder.addRoute(ip, 32)
             } catch (_: Exception) {}
         }
-        // Per-app modes (v1.1.0): apps set to OFF bypass the VPN entirely.
-        // Must be set before establish(); unknown/uninstalled packages
-        // throw and are skipped.
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        for (pkg in AppModes.offPackages(prefs)) {
-            try {
-                builder.addDisallowedApplication(pkg)
-            } catch (_: Exception) {}
-        }
         val pfd = builder.establish() ?: run {
                 running = false
                 stopSelf()
@@ -319,89 +309,11 @@ class AdShieldVpnService : VpnService() {
         )
     }
 
-    /**
-     * Which app made this DNS query (v1.1.0, API 29+): the kernel maps the
-     * query's UDP socket (source port) to its owning UID, and the UID maps
-     * to a package. Null when unattributable — the log then shows the app
-     * as "Unknown app" instead of guessing.
-     */
-    private data class AppIdentity(val packageName: String, val label: String)
-
-    private val uidIdentityCache = ConcurrentHashMap<Int, AppIdentity?>()
-
-    private fun identityForQuery(query: DnsQuery): AppIdentity? {
-        if (Build.VERSION.SDK_INT < 29) return null
-        val uid = try {
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE)
-                as? ConnectivityManager ?: return null
-            cm.getConnectionOwnerUid(
-                17, // UDP
-                java.net.InetSocketAddress(
-                    InetAddress.getByAddress(query.sourceIp), query.sourcePort
-                ),
-                java.net.InetSocketAddress(
-                    InetAddress.getByAddress(query.destIp), 53
-                )
-            )
-        } catch (_: Exception) {
-            return null
-        }
-        if (uid < 0) return null
-        if (uidIdentityCache.size > 1000) uidIdentityCache.clear()
-        return uidIdentityCache.getOrPut(uid) {
-            try {
-                val pkg = packageManager.getPackagesForUid(uid)?.firstOrNull()
-                    ?: return null
-                val label = try {
-                    packageManager.getApplicationLabel(
-                        packageManager.getApplicationInfo(pkg, 0)
-                    ).toString()
-                } catch (_: Exception) {
-                    pkg
-                }
-                AppIdentity(pkg, label)
-            } catch (_: Exception) {
-                null
-            }
-        }
-    }
-
-    private fun logQuery(question: DnsQuestion?, blocked: Boolean, identity: AppIdentity?) {
-        val q = question ?: return
-        QueryLog.add(
-            QueryEntry(
-                timeMs = System.currentTimeMillis(),
-                domain = q.name,
-                blocked = blocked,
-                appLabel = identity?.label ?: "Unknown app",
-                packageName = identity?.packageName
-            )
-        )
-    }
-
     private fun handleDns(query: DnsQuery) {
         val question = DnsPacket.parseQuestion(query.payload, query.payload.size)
-        val identity = if (question != null) identityForQuery(query) else null
-        // Per-app mode (v1.1.0): NO_INTERNET apps get NXDOMAIN for
-        // everything, so they are effectively offline.
-        if (question != null && identity != null) {
-            val mode = AppModes.getMode(
-                getSharedPreferences(PREFS, MODE_PRIVATE), identity.packageName
-            )
-            if (mode == AppMode.NO_INTERNET) {
-                recordQuery(true)
-                logQuery(question, true, identity)
-                writeDnsResponse(
-                    query.sourceIp, query.sourcePort, query.destIp,
-                    DnsPacket.blockedResponse(query.payload, query.payload.size)
-                )
-                return
-            }
-        }
         val hit = question != null && AdBlocker.isBlocked(question.name)
         recordQuery(hit)
         if (hit) {
-            logQuery(question, true, identity)
             // Anti-detect mode: answer A queries for blocked domains with
             // the local stub IP so bait requests *succeed* (empty surrogate
             // content) instead of failing and tripping "Ad blocker
@@ -425,7 +337,6 @@ class AdShieldVpnService : VpnService() {
             val entry = dnsCache[key]
             if (entry != null) {
                 if (entry.expiresAtMs > System.currentTimeMillis()) {
-                    logQuery(question, false, identity)
                     val cached = entry.response.copyOf()
                     if (cached.size >= 2 && query.payload.size >= 2) {
                         cached[0] = query.payload[0]
@@ -438,7 +349,6 @@ class AdShieldVpnService : VpnService() {
             }
         }
         val upstream = queryUpstream(query.payload) ?: return // no reply -> resolver retries
-        logQuery(question, false, identity)
         if (key != null) {
             if (dnsCache.size > 512) dnsCache.clear()
             val ttlMs = responseTtlSeconds(upstream) * 1000L
@@ -631,11 +541,6 @@ class AdShieldVpnService : VpnService() {
         const val STUB_ADDRESS = "10.10.10.3"
         const val KEY_SURROGATE = "surrogate_stubs"
         private val STUB_IP_BYTES = byteArrayOf(10, 10, 10, 3)
-        // Legacy (pre-1.0.0): true when the user installed the old HTTPS
-        // MITM CA certificate. The MITM engine is gone in 1.0.0; this flag
-        // is read-only now and only drives the "old certificate no longer
-        // used" migration note in the UI.
-        const val KEY_MITM_CA_DONE = "mitm_ca_done"
         // Well-known public DNS resolver IPs hijacked into the TUN (v0.6.0)
         // so hardcoded-DNS and encrypted-DNS bypass attempts hit this engine.
         private val PUBLIC_RESOLVER_IPS = listOf(
