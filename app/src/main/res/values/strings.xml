@@ -1,4 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="adskip_service_description">Auto-taps Skip Ad and Close buttons in any app, so video ads end as soon as they can be skipped.</string>
+    <string name="brand">S-ADSHIELD</string>
+    <string name="local_private">LOCAL • PRIVATE</string>
+    <string name="protection_active">Protection is active</string>
+    <string name="protection_off">Protection is off</string>
+    <string name="protection_desc">System-wide DNS protection against ads &amp; trackers</string>
+    <string name="start_protection">START PROTECTION</string>
+    <string name="stop_protection">STOP PROTECTION</string>
+    <string name="battery_ready">BATTERY: UNRESTRICTED ✓ — READY FOR 24x7</string>
+    <string name="battery_action">BATTERY: ALLOW UNRESTRICTED (FOR 24x7)</string>
+    <string name="live_overview">LIVE OVERVIEW</string>
+    <string name="queries">QUERIES</string>
+    <string name="blocked">BLOCKED</string>
+    <string name="block_rate">BLOCK RATE</string>
+    <string name="streaming_title">Streaming Extreme</string>
+    <string name="streaming_on">Extra blocking on — tap to turn off</string>
+    <string name="streaming_off">Extra blocking off — tap to turn on</string>
+    <string name="antidetect_title">Anti-Detect</string>
+    <string name="antidetect_on">Blocked sites answer with empty content — tap to turn off</string>
+    <string name="antidetect_off">Blocked sites fail closed — tap to turn on</string>
+    <string name="engine_title">PROTECTION ENGINE</string>
+    <string name="engine_headline">Local VPN DNS filter</string>
+    <string name="engine_detail">No remote VPN server • traffic stays on device</string>
+    <string name="sources_title">FILTER SOURCES</string>
+    <string name="sources_headline">250,000+ domains — EXTREME shield</string>
+    <string name="sources_detail">HaGeZi PRO • uBlock • StevenBlack • 7-network pack • Streaming SSAI pack (Prime / JioHotstar / Netflix)</string>
+    <string name="migration_title">OLD HTTPS CERTIFICATE</string>
+    <string name="migration_headline">No longer used — safe to remove</string>
+    <string name="migration_text">Version 1.0.0 removed HTTPS filtering. If you installed the old certificate, you can remove it in Settings → Trusted credentials → User → AdShield MITM CA. DNS protection is unaffected.</string>
+    <string name="footer">Developed with love by Shiv • S-AdShield v1.0.0</string>
 </resources>
